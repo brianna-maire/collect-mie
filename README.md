@@ -255,7 +255,7 @@ Uses `mie`, `fsc`, `ssc`, and `plot_diameter:` (or `plot-diameter:`).
 
 | Field | Default | Meaning |
 |-------|---------|---------|
-| `d_min_um` | 0.04 | Minimum diameter (µm); require $0 < \texttt{d\_min\_um} < \texttt{d\_max\_um}$. |
+| `d_min_um` | 0.04 | Minimum diameter (µm); require $0 < \texttt{d_min_um} < \texttt{d_max_um}$. |
 | `d_max_um` | 0.40 | Maximum diameter (µm). |
 | `n_diameters` | 120 | Linear diameter samples. |
 | `bands` | `both` | `both`, `fsc`, or `ssc` — which cones to compute. |

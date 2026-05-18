@@ -1,0 +1,201 @@
+"""Pydantic models for YAML run configuration (replaces argparse schemas)."""
+
+from __future__ import annotations
+
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from collect_mie.defaults import (
+    DEFAULT_FSC_CENTER_DEG,
+    DEFAULT_FSC_NA_INNER,
+    DEFAULT_FSC_NA_OUTER,
+    DEFAULT_N_MEDIUM,
+    DEFAULT_N_PARTICLE_REAL,
+    DEFAULT_SSC_CENTER_DEG,
+    DEFAULT_SSC_MASK_HALF_ANGLE_X_DEG,
+    DEFAULT_SSC_MASK_HALF_ANGLE_Z_DEG,
+    DEFAULT_SSC_NA,
+    DEFAULT_WAVELENGTH_NM,
+)
+
+Polarization = Literal["unpolarized", "parallel", "perpendicular"]
+SignalModeCli = Literal["absolute-cross-section", "phase-function"]
+BandsChoice = Literal["both", "fsc", "ssc"]
+NormalizeSimple = Literal["max", "first"]
+NormalizeOverlay = Literal["none", "max", "first", "global-max", "ref-first"]
+ChannelNaming = Literal["$PnS", "$PnN"]
+
+
+def _parse_float_list(value: object) -> list[float]:
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.replace(";", ",").split(",") if p.strip()]
+        if not parts:
+            raise ValueError("expected at least one value")
+        return [float(x) for x in parts]
+    if isinstance(value, (list, tuple)):
+        return [float(x) for x in value]
+    raise TypeError("expected comma-separated string or list of numbers")
+
+
+FloatList = Annotated[list[float], Field(min_length=1)]
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class RunOutputFields(_Strict):
+    output: str | None = None
+    write_run_record: str | None = None
+
+
+class MediumOptics(_Strict):
+    wavelength_nm: float = DEFAULT_WAVELENGTH_NM
+    n_medium: float = DEFAULT_N_MEDIUM
+    n_imag: float = 0.0
+    polarization: Polarization = "unpolarized"
+    signal_mode: SignalModeCli = "absolute-cross-section"
+
+    @field_validator("wavelength_nm", "n_medium")
+    @classmethod
+    def positive_medium(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("must be positive")
+        return v
+
+
+class ParticleOptics(_Strict):
+    n_real: float = DEFAULT_N_PARTICLE_REAL
+
+
+class FscBand(_Strict):
+    fsc_center_deg: float = DEFAULT_FSC_CENTER_DEG
+    fsc_na_outer: float = DEFAULT_FSC_NA_OUTER
+    fsc_na_inner: float = DEFAULT_FSC_NA_INNER
+
+
+class SscBand(_Strict):
+    ssc_center_deg: float = DEFAULT_SSC_CENTER_DEG
+    ssc_na: float = DEFAULT_SSC_NA
+
+
+class SscOptionalRectMask(_Strict):
+    """
+    When both mask half-angles are set in YAML (ssc: mask_half_angle_*_deg),
+    SSC integration uses cone ∩ rectangular mask; otherwise cone only.
+    """
+
+    ssc_mask_half_angle_x_deg: float | None = None
+    ssc_mask_half_angle_z_deg: float | None = None
+    ssc_rect_mask_n_phi: int = Field(default=720, ge=8)
+
+    @model_validator(mode="after")
+    def check_mask_pair(self) -> SscOptionalRectMask:
+        x, z = self.ssc_mask_half_angle_x_deg, self.ssc_mask_half_angle_z_deg
+        if (x is None) ^ (z is None):
+            raise ValueError(
+                "set both ssc_mask_half_angle_x_deg and ssc_mask_half_angle_z_deg "
+                "in ssc:, or omit both for cone-only collection"
+            )
+        if x is not None and (x <= 0 or z <= 0):
+            raise ValueError("mask half-angles must be positive when set")
+        return self
+
+
+class SscRectMaskRequired(_Strict):
+    """Required mask defaults for plot-diameter-ssc-rect-mask comparison runs."""
+
+    ssc_mask_half_angle_x_deg: float = DEFAULT_SSC_MASK_HALF_ANGLE_X_DEG
+    ssc_mask_half_angle_z_deg: float = DEFAULT_SSC_MASK_HALF_ANGLE_Z_DEG
+    ssc_rect_mask_n_phi: int = Field(default=720, ge=8)
+
+
+class SscBandMixin(SscBand, SscOptionalRectMask):
+    """SSC band + optional rectangular mask (shared by collection helpers)."""
+
+
+class DiameterSweep(_Strict):
+    d_min_um: float = 0.04
+    d_max_um: float = 0.40
+    n_diameters: int = Field(default=120, ge=2)
+
+    @model_validator(mode="after")
+    def check_diameter_range(self) -> DiameterSweep:
+        if self.d_min_um <= 0 or self.d_max_um <= self.d_min_um:
+            raise ValueError("require 0 < d_min_um < d_max_um")
+        return self
+
+
+class PlotAngleConfig(MediumOptics, ParticleOptics, RunOutputFields):
+    diameter_um: float
+    theta_min_deg: float = 0.1
+    theta_max_deg: float = 180.0
+    n_points: int = Field(default=3600, ge=2)
+
+    @field_validator("diameter_um")
+    @classmethod
+    def positive_diameter(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("diameter_um must be positive")
+        return v
+
+
+class PlotDiameterConfig(
+    MediumOptics, ParticleOptics, FscBand, SscBandMixin, DiameterSweep, RunOutputFields
+):
+    bands: BandsChoice = "both"
+    normalize: NormalizeSimple = "max"
+
+
+class PlotRefractiveIndexConfig(MediumOptics, SscBandMixin, DiameterSweep, RunOutputFields):
+    n_real_list: FloatList
+    normalize: NormalizeOverlay = "none"
+
+    @field_validator("n_real_list", mode="before")
+    @classmethod
+    def coerce_n_real_list(cls, v: object) -> list[float]:
+        return _parse_float_list(v)
+
+
+class PlotSscVsNaConfig(MediumOptics, ParticleOptics, SscOptionalRectMask, RunOutputFields):
+    ssc_center_deg: float = DEFAULT_SSC_CENTER_DEG
+    na_min: float = 1.0
+    na_max: float = 1.4
+    n_na: int = Field(default=41, ge=2)
+    diameter_um_list: FloatList = Field(default_factory=lambda: [0.5, 1.0, 3.0, 6.0])
+    normalize: NormalizeOverlay = "none"
+
+    @field_validator("diameter_um_list", mode="before")
+    @classmethod
+    def coerce_diameter_list(cls, v: object) -> list[float]:
+        return _parse_float_list(v)
+
+    @field_validator("diameter_um_list")
+    @classmethod
+    def positive_diameters(cls, v: list[float]) -> list[float]:
+        if any(d <= 0 for d in v):
+            raise ValueError("all diameters must be positive")
+        return v
+
+    @model_validator(mode="after")
+    def check_na_sweep(self) -> PlotSscVsNaConfig:
+        if self.na_min <= 0 or self.na_max <= self.na_min:
+            raise ValueError("require 0 < na_min < na_max")
+        return self
+
+
+class PlotDiameterSscRectMaskConfig(
+    MediumOptics, ParticleOptics, SscBand, SscRectMaskRequired, DiameterSweep, RunOutputFields
+):
+    normalize: NormalizeSimple = "max"
+
+
+class CompareFcsConfig(
+    MediumOptics, ParticleOptics, FscBand, SscBandMixin, RunOutputFields
+):
+    manifest: str
+    fsc_channel: str = "FSC-A"
+    ssc_channel: str = "SSC-A"
+    channel_naming: ChannelNaming = "$PnS"
+    normalize: NormalizeSimple = "max"

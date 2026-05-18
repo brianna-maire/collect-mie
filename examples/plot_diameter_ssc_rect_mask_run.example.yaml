@@ -1,0 +1,27 @@
+# Run: collect-mie examples/plot_diameter_ssc_rect_mask_run.example.yaml
+
+run:
+  command: plot-diameter-ssc-rect-mask
+  args:
+    output: examples/output/plot_diameter_ssc_rect_mask.png
+    write_run_record: examples/output/plot_diameter_ssc_rect_mask_run_record.yaml
+
+mie:
+  wavelength_nm: 405
+  n_medium: 1.3374
+  n_real: 1.602
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+ssc:
+  center_deg: 90.0
+  na: 1.29
+  mask_half_angle_x_deg: 68.0
+  mask_half_angle_z_deg: 75.0
+
+plot_diameter_ssc_rect_mask:
+  d_min_um: 0.04
+  d_max_um: 5.0
+  n_diameters: 100
+  normalize: max

@@ -1,0 +1,32 @@
+# Run: collect-mie examples/plot_diameter_run.example.yaml
+
+run:
+  command: plot-diameter
+  args:
+    output: examples/output/plot_diameter.png
+    write_run_record: examples/output/plot_diameter_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.602
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+fsc:
+  center_deg: 0.0
+  na_outer: 0.34
+  na_inner: 0.23
+
+ssc:
+  center_deg: 90.0
+  na: 1.29
+
+plot_diameter:
+  # both | fsc | ssc — which detector cones to compute and plot
+  bands: ssc
+  d_min_um: 0.04
+  d_max_um: 0.40
+  n_diameters: 80
+  normalize: max

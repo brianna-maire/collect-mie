@@ -1,0 +1,21 @@
+# Run: collect-mie examples/plot_angle_run.example.yaml
+
+run:
+  command: plot-angle
+  args:
+    output: examples/output/plot_angle.png
+    write_run_record: examples/output/plot_angle_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.602
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+plot_angle:
+  diameter_um: 1.0
+  theta_min_deg: 0.1
+  theta_max_deg: 180.0
+  n_points: 3600

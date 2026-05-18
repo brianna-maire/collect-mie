@@ -1,0 +1,5 @@
+# Copy this file to compare_manifest.txt and set real paths.
+# Format per line: diameter_um  /path/to/beads.fcs
+#
+# 1.0 /data/beads_1um.fcs
+# 2.0 /data/beads_2um.fcs

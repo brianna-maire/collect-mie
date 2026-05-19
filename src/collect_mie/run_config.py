@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import matplotlib.figure
 import yaml
 from pydantic import BaseModel
 
@@ -84,6 +85,28 @@ def dispatch_config(config_path: str) -> None:
     fn(config_path=config_path)
 
 
+def ensure_parent_dir(path: str | Path) -> Path:
+    """Create parent directories for a file path when they do not exist."""
+    out = Path(path)
+    parent = out.parent
+    if parent != out:
+        parent.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def save_figure(
+    fig: matplotlib.figure.Figure,
+    path: str | Path,
+    *,
+    dpi: int = 150,
+    **kwargs: Any,
+) -> Path:
+    """Save a matplotlib figure, creating parent directories first."""
+    out = ensure_parent_dir(path)
+    fig.savefig(out, dpi=dpi, **kwargs)
+    return out
+
+
 def write_run_record(
     path: str,
     *,
@@ -98,6 +121,5 @@ def write_run_record(
         "config_path": config_path,
         "resolved_config": resolved.model_dump(mode="python"),
     }
-    out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out = ensure_parent_dir(path)
     out.write_text(yaml.safe_dump(record, sort_keys=False), encoding="utf-8")

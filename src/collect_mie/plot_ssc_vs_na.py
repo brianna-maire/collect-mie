@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     fig.tight_layout()
 
     if cfg.output:
-        fig.savefig(cfg.output, dpi=150)
+        save_figure(fig, cfg.output, dpi=150)
     else:
         plt.show()
 

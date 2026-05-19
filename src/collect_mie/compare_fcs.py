@@ -18,7 +18,7 @@ from collect_mie.config_schema import CompareFcsConfig
 from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
 from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.fcs_io import load_manifest_rows, median_channel
-from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
 def main(argv: list[str] | None = None, *, config_path: str | None = None) -> None:
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     fig.tight_layout()
 
     if cfg.output:
-        fig.savefig(cfg.output, dpi=150)
+        save_figure(fig, cfg.output, dpi=150)
     else:
         plt.show()
 

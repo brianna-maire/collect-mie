@@ -9,7 +9,7 @@ run:
 mie:
   wavelength_nm: 488
   n_medium: 1.3374
-  n_real: 1.602
+  n_real: 1.6020
   n_imag: 0.0
   polarization: unpolarized
   signal_mode: absolute-cross-section

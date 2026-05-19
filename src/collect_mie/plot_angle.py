@@ -7,6 +7,7 @@ import sys
 import matplotlib.pyplot as plt
 
 from collect_mie.common import signal_mode_value
+from collect_mie.plot_format import fmt_n, fmt_particle_n
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotAngleConfig
 from collect_mie.core import angular_intensity_curve
@@ -42,8 +43,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     ax.set_ylabel(r"Intensity (1/sr)")
     ax.set_title(
         f"Mie scattering  λ={wl_nm:g} nm vacuum  d={cfg.diameter_um:g} µm  "
-        f"n={cfg.n_real:g}{'' if cfg.n_imag == 0 else f'{cfg.n_imag:+g}'}  "
-        f"n_medium={cfg.n_medium:g}"
+        f"n={fmt_particle_n(cfg.n_real, cfg.n_imag)}  n_medium={fmt_n(cfg.n_medium)}"
     )
     ax.set_yscale("log")
     ax.grid(True, alpha=0.3)

@@ -16,9 +16,13 @@ from collect_mie.common import (
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotRefractiveIndexConfig
 from collect_mie.core import normalize_relative
-from collect_mie.ssc_collection import (
-    diameter_sweep_ssc_from_config,
-    ssc_uses_rect_mask,
+from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
+from collect_mie.plot_format import (
+    fmt_deg,
+    fmt_na,
+    fmt_n,
+    fmt_particle_n,
+    format_ssc_rect_mask_note,
 )
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
@@ -39,7 +43,7 @@ def _apply_normalize_overlay(
         ref = stacked[0].astype(float, copy=False)
         scale = max(float(np.max(np.abs(stacked))), eps)
         ref_safe = np.where(np.abs(ref) < eps * scale, eps * scale, ref)
-        return stacked / ref_safe[np.newaxis, :], f"SSC / SSC (n={n_ref_display:g})"
+        return stacked / ref_safe[np.newaxis, :], f"SSC / SSC (n={fmt_n(n_ref_display)})"
     if mode == "max":
         return (
             np.array([normalize_relative(row, mode="max") for row in stacked]),
@@ -93,24 +97,20 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for i, n_real in enumerate(cfg.n_real_list):
-        label = f"n={n_real:g}"
-        if cfg.n_imag != 0:
-            label += f"{cfg.n_imag:+g}j"
+        label = f"n={fmt_particle_n(n_real, cfg.n_imag)}"
         ax.plot(diam_um, plot_y[i], label=label)
 
     ax.set_yscale("log")
     ax.set_xlabel("Diameter (µm)")
     ax.set_ylabel(y_label)
-    if ssc_uses_rect_mask(cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg):
-        mask_note = (
-            f", NA cone ∩ rect mask (mask_x={cfg.ssc_mask_half_angle_x_deg:g}°, "
-            f"mask_z={cfg.ssc_mask_half_angle_z_deg:g}°)"
-        )
-    else:
+    mask_note = format_ssc_rect_mask_note(
+        cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg
+    )
+    if not mask_note:
         mask_note = ", NA cone"
     ax.set_title(
-        f"SSC vs diameter λ={wl_nm:g} nm (vacuum), n_medium={cfg.n_medium:g}\n"
-        f"SSC center={cfg.ssc_center_deg:g}°, alpha={ssc_alpha:.2f}°{mask_note}"
+        f"SSC vs diameter λ={wl_nm:g} nm (vacuum), n_medium={fmt_n(cfg.n_medium)}\n"
+        f"SSC center={fmt_deg(cfg.ssc_center_deg)}°, alpha={fmt_deg(ssc_alpha)}°{mask_note}"
     )
     ax.legend(title="Particle index")
     ax.xaxis.set_minor_locator(AutoMinorLocator(5))

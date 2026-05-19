@@ -13,7 +13,14 @@ from collect_mie.common import ssc_half_angle_deg, signal_mode_value
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotSscVsNaConfig
 from collect_mie.core import normalize_relative
-from collect_mie.ssc_collection import integrate_ssc_from_config, ssc_uses_rect_mask
+from collect_mie.ssc_collection import integrate_ssc_from_config
+from collect_mie.plot_format import (
+    fmt_deg,
+    fmt_na,
+    fmt_n,
+    fmt_particle_n,
+    format_ssc_rect_mask_note,
+)
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
@@ -99,17 +106,17 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     ax.set_yscale("log")
     ax.set_xlabel("SSC numerical aperture")
     ax.set_ylabel(y_label)
-    if ssc_uses_rect_mask(cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg):
-        coll_note = (
-            f"NA cone ∩ rect mask (mask_x={cfg.ssc_mask_half_angle_x_deg:g}°, "
-            f"mask_z={cfg.ssc_mask_half_angle_z_deg:g}°)"
-        )
-    else:
+    coll_note = format_ssc_rect_mask_note(
+        cfg.ssc_mask_half_angle_x_deg,
+        cfg.ssc_mask_half_angle_z_deg,
+        prefix="",
+    )
+    if not coll_note:
         coll_note = "NA cone"
     ax.set_title(
-        f"SSC vs NA  λ={wl_nm:g} nm (vacuum), n={cfg.n_real:g}, "
-        f"n_medium={cfg.n_medium:g}\n"
-        f"SSC center={cfg.ssc_center_deg:g}°, collection={coll_note},\n"
+        f"SSC vs NA  λ={wl_nm:g} nm (vacuum), n={fmt_particle_n(cfg.n_real, cfg.n_imag)}, "
+        f"n_medium={fmt_n(cfg.n_medium)}\n"
+        f"SSC center={fmt_deg(cfg.ssc_center_deg)}°, collection={coll_note},\n"
         f"polarization={cfg.polarization}, signal_mode={cfg.signal_mode}"
     )
     ax.legend(title="Diameter")

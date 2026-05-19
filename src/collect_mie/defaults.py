@@ -8,7 +8,7 @@ calibration beads when comparing to experiment.
 
 DEFAULT_WAVELENGTH_NM = 488.0
 DEFAULT_N_MEDIUM = 1.3374
-DEFAULT_N_PARTICLE_REAL = 1.602
+DEFAULT_N_PARTICLE_REAL = 1.6020
 
 DEFAULT_FSC_CENTER_DEG = 0.0
 # Outer NA sets collection half-angle; inner NA models obscuration stop.

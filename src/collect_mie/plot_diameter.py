@@ -21,6 +21,13 @@ from collect_mie.ssc_collection import (
     diameter_sweep_ssc_from_config,
     ssc_uses_rect_mask,
 )
+from collect_mie.plot_format import (
+    fmt_deg,
+    fmt_na,
+    fmt_n,
+    fmt_particle_n,
+    format_ssc_rect_mask_note,
+)
 from collect_mie.run_config import resolve_config_path, write_run_record
 
 
@@ -76,8 +83,9 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             diam_um,
             fsc_rel,
             label=(
-                f"FSC annular cone center={cfg.fsc_center_deg:g}°, "
-                f"alpha_out={fsc_alpha_outer:.2f}°, alpha_in={fsc_alpha_inner:.2f}°"
+                f"FSC annular cone center={fmt_deg(cfg.fsc_center_deg)}°, "
+                f"NA_out={fmt_na(cfg.fsc_na_outer)}, NA_in={fmt_na(cfg.fsc_na_inner)}, "
+                f"alpha_out={fmt_deg(fsc_alpha_outer)}°, alpha_in={fmt_deg(fsc_alpha_inner)}°"
             ),
         )
 
@@ -92,20 +100,16 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             signal_mode=smode,
         )
         ssc_rel = normalize_relative(ssc_raw, mode=cfg.normalize)
-        if ssc_uses_rect_mask(
-            cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg
-        ):
-            mask_note = (
-                f", rect mask (mask_x={cfg.ssc_mask_half_angle_x_deg:g}°, "
-                f"mask_z={cfg.ssc_mask_half_angle_z_deg:g}°)"
-            )
-        else:
-            mask_note = ""
+        mask_note = format_ssc_rect_mask_note(
+            cfg.ssc_mask_half_angle_x_deg,
+            cfg.ssc_mask_half_angle_z_deg,
+        )
         ax.plot(
             diam_um,
             ssc_rel,
             label=(
-                f"SSC center={cfg.ssc_center_deg:g}°, alpha={ssc_alpha:.2f}°{mask_note}"
+                f"SSC center={fmt_deg(cfg.ssc_center_deg)}°, NA={fmt_na(cfg.ssc_na)}, "
+                f"alpha={fmt_deg(ssc_alpha)}°{mask_note}"
             ),
         )
 
@@ -119,8 +123,8 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         ax.set_ylabel("Relative integrated scatter")
 
     ax.set_title(
-        f"Mie Model λ={wl_nm:g} nm (vacuum), n={cfg.n_real:g}, n_medium={cfg.n_medium:g}, "
-        f"bands={cfg.bands}\n"
+        f"Mie Model λ={wl_nm:g} nm (vacuum), n={fmt_particle_n(cfg.n_real, cfg.n_imag)}, "
+        f"n_medium={fmt_n(cfg.n_medium)}, bands={cfg.bands}\n"
         f"polarization={cfg.polarization}, signal_mode={cfg.signal_mode}"
     )
     ax.legend()

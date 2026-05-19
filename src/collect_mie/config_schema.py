@@ -23,6 +23,9 @@ Polarization = Literal["unpolarized", "parallel", "perpendicular"]
 SignalModeCli = Literal["absolute-cross-section", "phase-function"]
 BandsChoice = Literal["both", "fsc", "ssc"]
 NormalizeSimple = Literal["max", "first"]
+CompareNormalize = Literal["max", "first", "least_squares"]
+MedianError = Literal["none", "bootstrap"]
+ChannelGate = Literal["none", "log_decades"]
 NormalizeOverlay = Literal["none", "max", "first", "global-max", "ref-first"]
 ChannelNaming = Literal["$PnS", "$PnN"]
 
@@ -192,10 +195,27 @@ class PlotDiameterSscRectMaskConfig(
 
 
 class CompareFcsConfig(
-    MediumOptics, ParticleOptics, FscBand, SscBandMixin, RunOutputFields
+    MediumOptics, ParticleOptics, FscBand, SscBandMixin, DiameterSweep, RunOutputFields
 ):
     manifest: str
-    fsc_channel: str = "FSC-A"
+    fsc_channel: str | None = None
     ssc_channel: str = "SSC-A"
     channel_naming: ChannelNaming = "$PnS"
-    normalize: NormalizeSimple = "max"
+    normalize: CompareNormalize = "max"
+    ssc_histogram_output: str | None = None
+    ssc_histogram_bins: int = Field(default=50, gt=0)
+    median_error: MedianError = "none"
+    median_ci_percent: float = Field(default=95.0, gt=0, lt=100)
+    median_bootstrap_n: int = Field(default=2000, ge=100)
+    median_bootstrap_max_events: int = Field(default=20_000, ge=100)
+    median_gate: ChannelGate = "none"
+    median_gate_log_decades: float = Field(default=0.5, gt=0)
+    median_gate_min_events: int = Field(default=100, ge=1)
+
+    @model_validator(mode="after")
+    def check_least_squares_signal_mode(self) -> CompareFcsConfig:
+        if self.normalize == "least_squares" and self.signal_mode != "absolute-cross-section":
+            raise ValueError(
+                "normalize=least_squares requires mie.signal_mode=absolute-cross-section"
+            )
+        return self

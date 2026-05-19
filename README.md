@@ -316,12 +316,22 @@ Uses `mie`, `fsc`, `ssc`, and `compare_fcs:`.
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `manifest` | *(required)* | Text file: nominal diameter (µm) and `.fcs` path per line. |
-| `fsc_channel` | `FSC-A` | FSC column for median. |
+| `fsc_channel` | *(omit)* | FSC column for median; omit to skip the FSC panel and Mie FSC curve. |
 | `ssc_channel` | `SSC-A` | SSC column for median. |
 | `channel_naming` | `$PnS` | `$PnS` or `$PnN` for FCS keyword lookup. |
-| `normalize` | `max` | `max` or `first`; applied separately to each experimental and model trace. |
+| `normalize` | `max` | `max` or `first` (relative overlay per trace), or `least_squares` (FCS medians in instrument units; model × single LS scale per channel). `least_squares` requires `signal_mode: absolute-cross-section`. |
+| `ssc_histogram_output` | *(derive from `output`)* | PNG of per-file SSC histogram subplots with medians marked. |
+| `ssc_histogram_bins` | `50` | Histogram bin count for the SSC panel figure. |
+| `median_error` | `none` | `none` or `bootstrap` — vertical bars from bootstrap CI on each file’s median. |
+| `median_ci_percent` | `95` | Two-sided CI level (e.g. `95` → 2.5th–97.5th percentiles of bootstrap medians). |
+| `median_bootstrap_n` | `2000` | Bootstrap resamples per `.fcs` file. |
+| `median_bootstrap_max_events` | `20000` | Subsample cap per file before bootstrapping (keeps large files fast). |
+| `median_gate` | `none` | `none` or `log_decades` — keep events within median/10^w…median×10^w before medians/CI. |
+| `median_gate_log_decades` | `0.5` | Half-width in decades (each side) for `log_decades` gate. |
+| `median_gate_min_events` | `100` | If the gate keeps fewer events, fall back to all positive events (with a warning). |
+| `d_min_um`, `d_max_um`, `n_diameters` | `0.04`, `0.40`, `120` | With `least_squares`, dense prediction curve on the top panel over this diameter range (model × LS scale). |
 
-Model curves use manifest diameters only (not a dense sweep).
+With `least_squares`, FCS medians stay at manifest diameters; the top panel adds a calibrated Mie prediction line from `d_min_um` to `d_max_um`. Parity and residual subplots and R²/RMSE appear in the title. SSC histograms are a separate figure.
 
 **Manifest format:** one bead per line — diameter (µm) and path (whitespace- or comma-separated). Lines starting with `#` are ignored.
 

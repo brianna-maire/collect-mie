@@ -401,6 +401,182 @@ def test_plot_ssc_vs_na_yaml_merges_plot_section_and_ssc_block():
     assert cfg.diameter_um_list == [0.5, 1.0]
 
 
+def test_plot_format_helpers():
+    from collect_mie.plot_format import (
+        fmt_deg,
+        fmt_na,
+        fmt_n,
+        fmt_particle_n,
+        format_ssc_rect_mask_note,
+    )
+
+    assert fmt_na(1.29) == "1.29"
+    assert fmt_deg(68.456) == "68.5"
+    assert fmt_n(1.602) == "1.6020"
+    assert fmt_particle_n(1.602, 0.0) == "1.6020"
+    assert fmt_particle_n(1.602, -0.001) == "1.6020-0.0010j"
+    assert format_ssc_rect_mask_note(None, 75.0) == ""
+    assert format_ssc_rect_mask_note(68.0, 75.0) == (
+        ", NA cone ∩ rect mask (mask_x=68.0°, mask_z=75.0°)"
+    )
+    assert format_ssc_rect_mask_note(68.0, 75.0, prefix="") == (
+        "NA cone ∩ rect mask (mask_x=68.0°, mask_z=75.0°)"
+    )
+
+
+def test_resolve_ssc_histogram_output_derives_from_primary():
+    from collect_mie.compare_fcs import resolve_ssc_histogram_output
+
+    assert (
+        resolve_ssc_histogram_output("out/compare_fcs.png", None)
+        == "out/compare_fcs_ssc_histograms.png"
+    )
+    assert (
+        resolve_ssc_histogram_output("out/compare_fcs.png", "out/custom.png")
+        == "out/custom.png"
+    )
+    assert resolve_ssc_histogram_output(None, None) is None
+
+
+def test_fit_metrics_through_origin():
+    from collect_mie.compare_fcs import fit_metrics
+
+    observed = np.array([2.0, 4.0, 6.0])
+    fitted = np.array([2.0, 4.0, 6.0])
+    r2, rmse = fit_metrics(observed, fitted)
+    assert r2 == 1.0
+    assert rmse == 0.0
+
+    fitted2 = np.array([1.0, 2.0, 3.0])
+    r2, rmse = fit_metrics(observed, fitted2)
+    assert r2 < 1.0
+    assert rmse > 0.0
+
+
+def test_least_squares_scale():
+    from collect_mie.compare_fcs import least_squares_scale
+
+    data = np.array([2.0, 4.0, 6.0])
+    model = np.array([1.0, 2.0, 3.0])
+    assert least_squares_scale(data, model) == 2.0
+
+
+def test_prepare_compare_trace_least_squares():
+    from collect_mie.compare_fcs import _prepare_compare_trace
+
+    med = np.array([10.0, 20.0])
+    model = np.array([1.0, 3.0])
+    exp_y, model_y, yerr, scale = _prepare_compare_trace(med, None, None, model, "least_squares")
+    assert scale == 7.0
+    np.testing.assert_allclose(exp_y, med)
+    np.testing.assert_allclose(model_y, model * 7.0)
+    assert yerr is None
+
+
+def test_compare_fcs_rejects_least_squares_with_phase_function():
+    from collect_mie.config_schema import CompareFcsConfig
+
+    with pytest.raises(ValidationError):
+        CompareFcsConfig.model_validate(
+            {
+                "manifest": "m.txt",
+                "normalize": "least_squares",
+                "signal_mode": "phase-function",
+            }
+        )
+
+
+def test_gate_log_decades_keeps_center_band():
+    from collect_mie.fcs_io import gate_log_decades
+
+    values = np.logspace(0, 4, 500)  # 1 .. 10000
+    gated, lo, hi = gate_log_decades(values, half_decades=0.5, min_events=10)
+    assert lo < np.median(values) < hi
+    assert np.all(gated >= lo)
+    assert np.all(gated <= hi)
+    assert gated.size < values.size
+
+
+def test_apply_channel_gate_none_passthrough():
+    from collect_mie.fcs_io import apply_channel_gate
+
+    vals = [np.array([1.0, 2.0])]
+    out, bounds = apply_channel_gate(vals, "none", half_decades=0.5, min_events=1)
+    assert bounds == [None]
+    np.testing.assert_array_equal(out[0], vals[0])
+
+
+def test_bootstrap_median_ci_brackets_median():
+    from collect_mie.fcs_io import bootstrap_median_ci
+
+    rng = np.random.default_rng(0)
+    values = rng.normal(10.0, 2.0, size=500)
+    med, lo, hi = bootstrap_median_ci(
+        values, ci_percent=95.0, n_boot=500, max_events=500, rng=rng
+    )
+    assert lo <= med <= hi
+    assert lo < hi
+
+
+def test_channel_median_and_bounds_bootstrap():
+    from collect_mie.fcs_io import channel_median_and_bounds
+
+    rng = np.random.default_rng(1)
+    vals = [rng.normal(5.0, 1.0, 200)]
+    med, lo, hi = channel_median_and_bounds(
+        vals, "bootstrap", ci_percent=90.0, n_boot=400, max_events=200, rng=rng
+    )
+    assert lo[0] <= med[0] <= hi[0]
+    assert lo[0] < hi[0]
+
+
+def test_normalize_median_bounds_matches_normalize_relative():
+    from collect_mie.compare_fcs import _normalize_median_bounds
+
+    med = np.array([10.0, 20.0, 40.0])
+    lo = np.array([8.0, 15.0, 30.0])
+    hi = np.array([12.0, 25.0, 50.0])
+    y, yerr = _normalize_median_bounds(med, lo, hi, "max")
+    np.testing.assert_allclose(y, [0.25, 0.5, 1.0])
+    assert yerr is not None
+    assert yerr.shape == (2, 3)
+
+
+def test_compare_fcs_config_allows_omitted_fsc_channel():
+    from collect_mie.config_schema import CompareFcsConfig
+
+    cfg = CompareFcsConfig.model_validate(
+        {
+            "manifest": "examples/compare_manifest.txt",
+            "ssc_channel": "SSC-A",
+        }
+    )
+    assert cfg.fsc_channel is None
+
+
+def test_compare_fcs_config_accepts_diameter_sweep():
+    from collect_mie.config_schema import CompareFcsConfig
+
+    cfg = CompareFcsConfig.model_validate(
+        {
+            "manifest": "m.txt",
+            "d_min_um": 0.1,
+            "d_max_um": 0.5,
+            "n_diameters": 50,
+        }
+    )
+    assert cfg.d_max_um == 0.5
+
+
+def test_load_manifest_rows_joins_path_with_spaces(tmp_path):
+    from collect_mie.fcs_io import load_manifest_rows
+
+    manifest = tmp_path / "manifest.txt"
+    manifest.write_text("0.151 fcs/NA129_full/151 nm.fcs\n")
+    rows = load_manifest_rows(str(manifest))
+    assert rows == [(0.151, "fcs/NA129_full/151 nm.fcs")]
+
+
 def test_ssc_indices_ref_first_divides_by_first_index_row():
     stacked = np.array([[2.0, 4.0], [4.0, 4.0]])
     y, _ = _apply_normalize_overlay(stacked, "ref-first", 1.59)

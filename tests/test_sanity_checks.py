@@ -406,3 +406,44 @@ def test_ssc_indices_ref_first_divides_by_first_index_row():
     y, _ = _apply_normalize_overlay(stacked, "ref-first", 1.59)
     np.testing.assert_allclose(y[0], [1.0, 1.0])
     np.testing.assert_allclose(y[1], [2.0, 1.0])
+
+
+def test_ensure_parent_dir_creates_nested_directories(tmp_path):
+    from collect_mie.run_config import ensure_parent_dir
+
+    target = tmp_path / "deep" / "nested" / "out.png"
+    assert ensure_parent_dir(target) == target
+    assert (tmp_path / "deep" / "nested").is_dir()
+    assert not target.exists()
+
+
+def test_save_figure_creates_parent_directories(tmp_path):
+    import matplotlib.pyplot as plt
+
+    from collect_mie.run_config import save_figure
+
+    out = tmp_path / "plots" / "angle.png"
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [1, 0])
+    save_figure(fig, out, dpi=50)
+    plt.close(fig)
+    assert out.is_file()
+    assert out.stat().st_size > 0
+
+
+def test_write_run_record_creates_parent_directories(tmp_path):
+    from collect_mie.config_schema import PlotAngleConfig
+    from collect_mie.run_config import write_run_record
+
+    record = tmp_path / "records" / "run.yaml"
+    cfg = PlotAngleConfig(diameter_um=1.0)
+    write_run_record(
+        str(record),
+        command_name="plot-angle",
+        config_path="examples/plot_angle_run.example.yaml",
+        resolved=cfg,
+    )
+    assert record.is_file()
+    text = record.read_text(encoding="utf-8")
+    assert "plot-angle" in text
+    assert "diameter_um" in text

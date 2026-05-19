@@ -14,7 +14,7 @@ from collect_mie.config import load_config
 from collect_mie.config_schema import PlotSscVsNaConfig
 from collect_mie.core import normalize_relative
 from collect_mie.ssc_collection import integrate_ssc_from_config, ssc_uses_rect_mask
-from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
 def _apply_normalize_na_sweep(
@@ -120,7 +120,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     fig.tight_layout()
 
     if cfg.output:
-        fig.savefig(cfg.output, dpi=150)
+        save_figure(fig, cfg.output, dpi=150)
     else:
         plt.show()
 

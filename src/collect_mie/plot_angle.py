@@ -10,7 +10,7 @@ from collect_mie.common import signal_mode_value
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotAngleConfig
 from collect_mie.core import angular_intensity_curve
-from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
 def main(argv: list[str] | None = None, *, config_path: str | None = None) -> None:
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     fig.tight_layout()
 
     if cfg.output:
-        fig.savefig(cfg.output, dpi=150)
+        save_figure(fig, cfg.output, dpi=150)
     else:
         plt.show()
 

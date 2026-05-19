@@ -23,7 +23,7 @@ from collect_mie.plot_format import (
     fmt_particle_n,
     format_ssc_rect_mask_note,
 )
-from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
 def main(argv: list[str] | None = None, *, config_path: str | None = None) -> None:

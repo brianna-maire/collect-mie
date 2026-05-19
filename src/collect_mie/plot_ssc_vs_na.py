@@ -14,8 +14,14 @@ from collect_mie.config import load_config
 from collect_mie.config_schema import PlotSscVsNaConfig
 from collect_mie.core import normalize_relative
 from collect_mie.ssc_collection import integrate_ssc_from_config
-from collect_mie.plot_format import fmt_deg, fmt_na, fmt_n, fmt_particle_n, format_ssc_rect_mask_note
-from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.plot_format import (
+    fmt_deg,
+    fmt_na,
+    fmt_n,
+    fmt_particle_n,
+    format_ssc_rect_mask_note,
+)
+from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
 def _apply_normalize_na_sweep(

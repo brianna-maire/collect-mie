@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 fcs/
 .DS_Store
+examples/compare_manifest.txt

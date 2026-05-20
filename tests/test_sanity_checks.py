@@ -501,9 +501,61 @@ def test_apply_channel_gate_none_passthrough():
     from collect_mie.fcs_io import apply_channel_gate
 
     vals = [np.array([1.0, 2.0])]
-    out, bounds = apply_channel_gate(vals, "none", half_decades=0.5, min_events=1)
+    out, bounds, peaks = apply_channel_gate(vals, "none", half_decades=0.5, min_events=1)
     assert bounds == [None]
+    assert peaks == [None]
     np.testing.assert_array_equal(out[0], vals[0])
+
+
+def test_log_histogram_peak_center_finds_bright_mode():
+    from collect_mie.fcs_io import log_histogram_peak_center
+
+    rng = np.random.default_rng(0)
+    background = rng.lognormal(mean=2.0, sigma=0.4, size=8000)
+    cells = rng.lognormal(mean=4.5, sigma=0.15, size=1200)
+    values = np.concatenate([background, cells])
+    peak = log_histogram_peak_center(
+        values,
+        bins=120,
+        smooth_bins=5,
+        prominence_fraction=0.05,
+        selection="rightmost_prominent",
+    )
+    assert peak > float(np.median(values))
+    assert abs(np.log10(peak) - 4.5) < 0.6
+
+
+def test_channel_summary_peak_gated_median_above_background():
+    from collect_mie.fcs_io import channel_summary_and_bounds
+
+    rng = np.random.default_rng(1)
+    background = rng.lognormal(mean=2.0, sigma=0.35, size=6000)
+    cells = rng.lognormal(mean=4.2, sigma=0.12, size=1500)
+    values = np.concatenate([background, cells])
+    med, _, _, peaks, bounds = channel_summary_and_bounds(
+        [values],
+        "peak_gated_median",
+        "none",
+        "none",
+        half_decades=0.35,
+        min_events=50,
+        peak_bins=100,
+    )
+    assert peaks[0] is not None
+    assert bounds[0] is not None
+    assert float(med[0]) > float(np.median(values))
+
+
+def test_gate_log_decades_accepts_explicit_center():
+    from collect_mie.fcs_io import gate_log_decades
+
+    values = np.logspace(0, 4, 500)
+    center = float(np.percentile(values, 90))
+    gated, lo, hi = gate_log_decades(
+        values, half_decades=0.25, min_events=10, center=center
+    )
+    assert lo < center < hi
+    assert np.median(gated) > float(np.median(values)) * 0.5
 
 
 def test_bootstrap_median_ci_brackets_median():

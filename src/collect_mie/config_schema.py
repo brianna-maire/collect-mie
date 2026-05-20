@@ -26,6 +26,8 @@ NormalizeSimple = Literal["max", "first"]
 CompareNormalize = Literal["max", "first", "least_squares"]
 MedianError = Literal["none", "bootstrap"]
 ChannelGate = Literal["none", "log_decades"]
+ChannelSummary = Literal["median", "peak_gated_median"]
+PeakSelection = Literal["highest_prominence", "rightmost_prominent"]
 NormalizeOverlay = Literal["none", "max", "first", "global-max", "ref-first"]
 ChannelNaming = Literal["$PnS", "$PnN"]
 
@@ -208,9 +210,14 @@ class CompareFcsConfig(
     median_ci_percent: float = Field(default=95.0, gt=0, lt=100)
     median_bootstrap_n: int = Field(default=2000, ge=100)
     median_bootstrap_max_events: int = Field(default=20_000, ge=100)
+    channel_summary: ChannelSummary = "peak_gated_median"
     median_gate: ChannelGate = "none"
     median_gate_log_decades: float = Field(default=0.5, gt=0)
     median_gate_min_events: int = Field(default=100, ge=1)
+    peak_histogram_bins: int = Field(default=200, gt=0)
+    peak_selection: PeakSelection = "rightmost_prominent"
+    peak_prominence_fraction: float = Field(default=0.05, gt=0, le=1)
+    peak_smooth_bins: int = Field(default=3, ge=1)
 
     @model_validator(mode="after")
     def check_least_squares_signal_mode(self) -> CompareFcsConfig:

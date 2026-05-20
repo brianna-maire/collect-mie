@@ -23,8 +23,7 @@ from collect_mie.config_schema import CompareFcsConfig
 from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
 from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.fcs_io import (
-    apply_channel_gate,
-    channel_median_and_bounds,
+    channel_summary_and_bounds,
     load_manifest_rows,
     read_channel,
 )
@@ -167,31 +166,48 @@ def _prepare_compare_trace(
     return exp_y, model_y, yerr, None
 
 
-def _gate_kwargs(cfg: CompareFcsConfig) -> dict[str, object]:
+def _channel_summary_kwargs(cfg: CompareFcsConfig) -> dict[str, object]:
     return {
+        "summary": cfg.channel_summary,
+        "error": cfg.median_error,
+        "gate": cfg.median_gate,
         "half_decades": cfg.median_gate_log_decades,
         "min_events": cfg.median_gate_min_events,
-    }
-
-
-def _gate_channel_values(
-    values_per_file: list[np.ndarray], cfg: CompareFcsConfig
-) -> tuple[list[np.ndarray], list[tuple[float, float] | None]]:
-    with warnings.catch_warnings():
-        warnings.simplefilter("default", category=UserWarning)
-        return apply_channel_gate(
-            values_per_file,
-            cfg.median_gate,
-            **_gate_kwargs(cfg),  # type: ignore[arg-type]
-        )
-
-
-def _median_bounds_kwargs(cfg: CompareFcsConfig) -> dict[str, object]:
-    return {
+        "peak_bins": cfg.peak_histogram_bins,
+        "peak_selection": cfg.peak_selection,
+        "peak_prominence_fraction": cfg.peak_prominence_fraction,
+        "peak_smooth_bins": cfg.peak_smooth_bins,
         "ci_percent": cfg.median_ci_percent,
         "n_boot": cfg.median_bootstrap_n,
         "max_events": cfg.median_bootstrap_max_events,
     }
+
+
+def _summarize_channel_values(
+    values_per_file: list[np.ndarray], cfg: CompareFcsConfig
+) -> tuple[
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray | None,
+    list[float | None],
+    list[tuple[float, float] | None],
+]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("default", category=UserWarning)
+        return channel_summary_and_bounds(
+            values_per_file,
+            **_channel_summary_kwargs(cfg),  # type: ignore[arg-type]
+        )
+
+
+def _summary_kind_label(cfg: CompareFcsConfig) -> str:
+    if cfg.channel_summary == "peak_gated_median":
+        return "peak-gated median"
+    return "median"
+
+
+def _data_legend_label(cfg: CompareFcsConfig, channel: str) -> str:
+    return f"Data: {channel} {_summary_kind_label(cfg)}{_median_legend_suffix(cfg)}"
 
 
 def _median_legend_suffix(cfg: CompareFcsConfig) -> str:
@@ -322,8 +338,10 @@ def _plot_ssc_histograms(
     paths: list[str],
     channel_label: str,
     values_per_file: list[np.ndarray],
-    medians: np.ndarray,
+    summaries: np.ndarray,
+    summary_label: str,
     gate_bounds: list[tuple[float, float] | None],
+    peak_centers: list[float | None],
     bins: int,
     hist_output: str | None,
 ) -> None:
@@ -341,7 +359,8 @@ def _plot_ssc_histograms(
     for i in range(n):
         ax = axes_flat[i]
         vals = values_per_file[i]
-        med = float(medians[i])
+        summary = float(summaries[i])
+        peak = peak_centers[i]
         positive = vals[vals > 0]
         if positive.size == 0:
             ax.text(
@@ -371,16 +390,21 @@ def _plot_ssc_histograms(
                 gate_lo, gate_hi = bounds
                 ax.axvline(gate_lo, color="0.45", linestyle=":", linewidth=1.2)
                 ax.axvline(gate_hi, color="0.45", linestyle=":", linewidth=1.2)
-            if med > 0:
-                ax.axvline(med, color="C3", linestyle="--", linewidth=1.5)
+            if peak is not None and peak > 0:
+                ax.axvline(peak, color="C2", linestyle="-.", linewidth=1.2)
+            if summary > 0:
+                ax.axvline(summary, color="C3", linestyle="--", linewidth=1.5)
             ax.set_xscale("log")
         ax.set_title(f"d = {diam_um[i]:g} µm\n{Path(paths[i]).name}", fontsize=9)
         ax.set_xlabel(channel_label)
         ax.set_ylabel("Events")
+        note = f"{summary_label} = {summary:.6g}"
+        if peak is not None:
+            note += f"\npeak = {peak:.6g}"
         ax.text(
             0.97,
             0.95,
-            f"median = {med:.6g}",
+            note,
             transform=ax.transAxes,
             ha="right",
             va="top",
@@ -421,10 +445,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             read_channel(p, cfg.fsc_channel, channel_naming=cfg.channel_naming)[1]
             for p in paths
         ]
-        fsc_gated, fsc_gate_bounds = _gate_channel_values(fsc_per_file, cfg)
-        fsc_med, fsc_lo, fsc_hi = channel_median_and_bounds(
-            fsc_gated, cfg.median_error, **_median_bounds_kwargs(cfg)
-        )
+        fsc_med, fsc_lo, fsc_hi, _, _ = _summarize_channel_values(fsc_per_file, cfg)
     ssc_col, ssc_values = read_channel(
         paths[0], cfg.ssc_channel, channel_naming=cfg.channel_naming
     )
@@ -438,9 +459,8 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
                 f"SSC column name mismatch: {ssc_col!r} vs {col!r} in {p!r}"
             )
         ssc_per_file.append(values)
-    ssc_gated, ssc_gate_bounds = _gate_channel_values(ssc_per_file, cfg)
-    ssc_med, ssc_lo, ssc_hi = channel_median_and_bounds(
-        ssc_gated, cfg.median_error, **_median_bounds_kwargs(cfg)
+    ssc_med, ssc_lo, ssc_hi, ssc_peak_centers, ssc_gate_bounds = (
+        _summarize_channel_values(ssc_per_file, cfg)
     )
     ssc_alpha = ssc_half_angle_deg(cfg.ssc_na, cfg.n_medium)
     ssc_min, ssc_max = resolve_ssc_band_deg(
@@ -564,7 +584,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
                 color="C0",
                 label=f"Mie FSC band{model_label_suffix}",
             )
-        fsc_label = f"Data: {cfg.fsc_channel} median{_median_legend_suffix(cfg)}"
+        fsc_label = _data_legend_label(cfg, str(cfg.fsc_channel))
         _scatter_median(
             ax_fsc,
             diam_exp_um,
@@ -575,7 +595,9 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             label=fsc_label,
         )
         ax_fsc.set_ylabel(
-            f"Median {cfg.fsc_channel}" if use_instrument_units else "Relative FSC"
+            f"{_summary_kind_label(cfg).title()} {cfg.fsc_channel}"
+            if use_instrument_units
+            else "Relative FSC"
         )
         ax_fsc.legend(loc="best")
         ax_fsc.set_yscale("log")
@@ -595,7 +617,8 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         ax_ssc.plot(
             ssc_pred_um,
             ssc_pred,
-            color="C1",
+            color="k",
+            linestyle="--",
             linewidth=1.2,
             label=f"Mie SSC prediction{model_label_suffix}",
             zorder=2,
@@ -607,7 +630,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             color="C1",
             label=f"Mie SSC calibration{model_label_suffix}",
         )
-    ssc_label = f"Data: {cfg.ssc_channel} median{_median_legend_suffix(cfg)}"
+    ssc_label = _data_legend_label(cfg, cfg.ssc_channel)
     _scatter_median(
         ax_ssc,
         diam_exp_um,
@@ -619,7 +642,9 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     )
     ax_ssc.set_xlabel("Diameter (µm)")
     ax_ssc.set_ylabel(
-        f"Median {cfg.ssc_channel}" if use_instrument_units else "Relative SSC"
+        f"{_summary_kind_label(cfg).title()} {cfg.ssc_channel}"
+        if use_instrument_units
+        else "Relative SSC"
     )
     ax_ssc.legend(loc="best")
     ax_ssc.set_yscale("log")
@@ -688,8 +713,10 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         paths=paths,
         channel_label=ssc_col,
         values_per_file=ssc_per_file,
-        medians=ssc_med,
+        summaries=ssc_med,
+        summary_label=_summary_kind_label(cfg),
         gate_bounds=ssc_gate_bounds,
+        peak_centers=ssc_peak_centers,
         bins=cfg.ssc_histogram_bins,
         hist_output=hist_output,
     )

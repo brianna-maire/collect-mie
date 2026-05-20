@@ -9,6 +9,9 @@ import numpy as np
 
 MedianError = Literal["none", "bootstrap"]
 ChannelGate = Literal["none", "log_decades"]
+ChannelSummary = Literal["median", "peak_gated_median"]
+PeakSelection = Literal["highest_prominence", "rightmost_prominent"]
+GateCenter = Literal["median", "peak"]
 
 try:
     import fcsparser
@@ -47,25 +50,131 @@ def read_channel(
     return col, values
 
 
+def _positive_finite(values: np.ndarray) -> np.ndarray:
+    return np.asarray(values[np.isfinite(values) & (values > 0)], dtype=float)
+
+
+def _smooth_1d(arr: np.ndarray, window: int) -> np.ndarray:
+    if window <= 1:
+        return arr
+    w = int(window)
+    if w % 2 == 0:
+        w += 1
+    kernel = np.ones(w, dtype=float) / w
+    return np.convolve(arr, kernel, mode="same")
+
+
+def _local_maxima_indices(counts: np.ndarray) -> np.ndarray:
+    """Indices of local maxima in a 1D count array."""
+    if counts.size < 3:
+        return np.array([], dtype=int)
+    peaks: list[int] = []
+    for i in range(1, counts.size - 1):
+        left, mid, right = counts[i - 1], counts[i], counts[i + 1]
+        if mid > left and mid >= right:
+            peaks.append(i)
+        elif mid >= left and mid > right:
+            peaks.append(i)
+    return np.asarray(peaks, dtype=int)
+
+
+def _peak_prominences(counts: np.ndarray, peak_indices: np.ndarray) -> np.ndarray:
+    """Prominence of each peak index: height above the higher enclosing minimum."""
+    prominences = np.empty(peak_indices.size, dtype=float)
+    for j, idx in enumerate(peak_indices):
+        left_min = float(np.min(counts[: idx + 1]))
+        right_min = float(np.min(counts[idx:]))
+        base = max(left_min, right_min)
+        prominences[j] = float(counts[idx]) - base
+    return prominences
+
+
+def log_histogram_peak_center(
+    values: np.ndarray,
+    *,
+    bins: int = 200,
+    smooth_bins: int = 3,
+    prominence_fraction: float = 0.05,
+    selection: PeakSelection = "rightmost_prominent",
+) -> float:
+    """
+    Estimate the bright population center from a log-spaced event histogram.
+
+    Finds local maxima on smoothed counts, filters by relative prominence, then picks
+    the highest-prominence or rightmost qualifying peak. Falls back to the median of
+    positive events when no peak passes the prominence filter.
+    """
+    positive = _positive_finite(values)
+    if positive.size == 0:
+        raise ValueError("no positive events for peak finding")
+
+    lo = float(np.min(positive))
+    hi = float(np.max(positive))
+    if lo >= hi:
+        return lo
+
+    edges = np.logspace(np.log10(lo), np.log10(hi), bins + 1)
+    counts, _ = np.histogram(positive, bins=edges)
+    counts = _smooth_1d(counts.astype(float), smooth_bins)
+    centers = np.sqrt(edges[:-1] * edges[1:])
+
+    peak_idx = _local_maxima_indices(counts)
+    if peak_idx.size == 0:
+        warnings.warn(
+            "log histogram peak find: no local maxima; using median of positive events",
+            stacklevel=2,
+        )
+        return float(np.median(positive))
+
+    prominences = _peak_prominences(counts, peak_idx)
+    max_prom = float(np.max(prominences))
+    if max_prom <= 0:
+        warnings.warn(
+            "log histogram peak find: zero prominence; using median of positive events",
+            stacklevel=2,
+        )
+        return float(np.median(positive))
+
+    min_prom = prominence_fraction * max_prom
+    keep = prominences >= min_prom
+    if not np.any(keep):
+        keep = prominences >= float(np.max(prominences)) * 0.5
+
+    candidates = peak_idx[keep]
+    cand_prom = prominences[keep]
+
+    if selection == "highest_prominence":
+        best = int(candidates[int(np.argmax(cand_prom))])
+    else:
+        best = int(candidates[int(np.argmax(candidates))])
+
+    return float(centers[best])
+
+
 def gate_log_decades(
     values: np.ndarray,
     *,
     half_decades: float,
     min_events: int = 100,
+    center: float | None = None,
 ) -> tuple[np.ndarray, float, float]:
     """
-    Keep positive events within [median/10^w, median×10^w] using the ungated median.
+    Keep positive events within [center/10^w, center×10^w].
 
+    ``center`` defaults to the median of positive events when omitted.
     If fewer than ``min_events`` pass the gate, returns all positive events and still
-    reports the gate bounds from the first-pass median.
+    reports the gate bounds from the chosen center.
     """
-    positive = np.asarray(values[np.isfinite(values) & (values > 0)], dtype=float)
+    positive = _positive_finite(values)
     if positive.size == 0:
         raise ValueError("no positive events to gate")
 
-    center = float(np.median(positive))
-    lo = center / (10.0**half_decades)
-    hi = center * (10.0**half_decades)
+    if center is None:
+        center_f = float(np.median(positive))
+    else:
+        center_f = float(center)
+    lo = center_f / (10.0**half_decades)
+    hi = center_f * (10.0**half_decades)
     gated = positive[(positive >= lo) & (positive <= hi)]
     if gated.size < min_events:
         warnings.warn(
@@ -83,20 +192,199 @@ def apply_channel_gate(
     *,
     half_decades: float,
     min_events: int,
-) -> tuple[list[np.ndarray], list[tuple[float, float] | None]]:
-    """Optionally gate each file's events before median / bootstrap summaries."""
+    gate_center: GateCenter = "median",
+    peak_bins: int = 200,
+    peak_selection: PeakSelection = "rightmost_prominent",
+    peak_prominence_fraction: float = 0.05,
+    peak_smooth_bins: int = 3,
+) -> tuple[list[np.ndarray], list[tuple[float, float] | None], list[float | None]]:
+    """
+    Optionally gate each file's events before channel summaries.
+
+    Returns gated values, optional (lo, hi) bounds per file, and optional peak centers
+    used when ``gate_center='peak'``.
+    """
     if gate == "none":
-        return values_per_file, [None] * len(values_per_file)
+        return values_per_file, [None] * len(values_per_file), [None] * len(values_per_file)
 
     gated: list[np.ndarray] = []
     bounds: list[tuple[float, float] | None] = []
+    peak_centers: list[float | None] = []
     for values in values_per_file:
+        center: float | None = None
+        if gate_center == "peak":
+            center = log_histogram_peak_center(
+                values,
+                bins=peak_bins,
+                smooth_bins=peak_smooth_bins,
+                prominence_fraction=peak_prominence_fraction,
+                selection=peak_selection,
+            )
+            peak_centers.append(center)
+        else:
+            peak_centers.append(None)
+
         g, lo, hi = gate_log_decades(
-            values, half_decades=half_decades, min_events=min_events
+            values,
+            half_decades=half_decades,
+            min_events=min_events,
+            center=center,
         )
         gated.append(g)
         bounds.append((lo, hi))
-    return gated, bounds
+    return gated, bounds, peak_centers
+
+
+def _peak_window_gate(
+    values: np.ndarray,
+    *,
+    half_decades: float,
+    min_events: int,
+    peak_bins: int,
+    peak_selection: PeakSelection,
+    peak_prominence_fraction: float,
+    peak_smooth_bins: int,
+) -> tuple[np.ndarray, float, float, float]:
+    """Gate positive events in a log-decade window centered on the histogram peak."""
+    peak = log_histogram_peak_center(
+        values,
+        bins=peak_bins,
+        smooth_bins=peak_smooth_bins,
+        prominence_fraction=peak_prominence_fraction,
+        selection=peak_selection,
+    )
+    gated, lo, hi = gate_log_decades(
+        values,
+        half_decades=half_decades,
+        min_events=min_events,
+        center=peak,
+    )
+    return gated, lo, hi, peak
+
+
+def channel_summary_and_bounds(
+    values_per_file: list[np.ndarray],
+    summary: ChannelSummary,
+    error: MedianError,
+    gate: ChannelGate,
+    *,
+    half_decades: float,
+    min_events: int,
+    peak_bins: int = 200,
+    peak_selection: PeakSelection = "rightmost_prominent",
+    peak_prominence_fraction: float = 0.05,
+    peak_smooth_bins: int = 3,
+    ci_percent: float = 95.0,
+    n_boot: int = 2000,
+    max_events: int = 20_000,
+    rng: np.random.Generator | None = None,
+) -> tuple[
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray | None,
+    list[float | None],
+    list[tuple[float, float] | None],
+]:
+    """
+    Per-file channel summaries and optional bootstrap CI bounds.
+
+    ``median``: optional ``log_decades`` gate centered on the ungated median, then median.
+    ``peak_gated_median``: peak-centered log-decade window (always), then median of gated
+    events, using ``half_decades`` / ``min_events`` for the window width.
+
+    Returns ``(summaries, lows, highs, peak_centers, gate_bounds)``.
+    """
+    n = len(values_per_file)
+    peak_centers: list[float | None] = [None] * n
+    gate_bounds: list[tuple[float, float] | None] = [None] * n
+
+    if summary == "median":
+        if gate == "log_decades":
+            gated, gate_bounds, _ = apply_channel_gate(
+                values_per_file,
+                gate,
+                half_decades=half_decades,
+                min_events=min_events,
+                gate_center="median",
+            )
+        else:
+            gated = values_per_file
+        return _summaries_from_gated(
+            gated,
+            error,
+            ci_percent=ci_percent,
+            n_boot=n_boot,
+            max_events=max_events,
+            rng=rng,
+            peak_centers=peak_centers,
+            gate_bounds=gate_bounds,
+        )
+
+    gated_list: list[np.ndarray] = []
+    for i, values in enumerate(values_per_file):
+        g, lo, hi, peak = _peak_window_gate(
+            values,
+            half_decades=half_decades,
+            min_events=min_events,
+            peak_bins=peak_bins,
+            peak_selection=peak_selection,
+            peak_prominence_fraction=peak_prominence_fraction,
+            peak_smooth_bins=peak_smooth_bins,
+        )
+        gated_list.append(g)
+        peak_centers[i] = peak
+        gate_bounds[i] = (lo, hi)
+
+    return _summaries_from_gated(
+        gated_list,
+        error,
+        ci_percent=ci_percent,
+        n_boot=n_boot,
+        max_events=max_events,
+        rng=rng,
+        peak_centers=peak_centers,
+        gate_bounds=gate_bounds,
+    )
+
+
+def _summaries_from_gated(
+    gated: list[np.ndarray],
+    error: MedianError,
+    *,
+    ci_percent: float,
+    n_boot: int,
+    max_events: int,
+    rng: np.random.Generator | None,
+    peak_centers: list[float | None],
+    gate_bounds: list[tuple[float, float] | None],
+) -> tuple[
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray | None,
+    list[float | None],
+    list[tuple[float, float] | None],
+]:
+    summaries = np.empty(len(gated), dtype=float)
+    if error == "none":
+        for i, values in enumerate(gated):
+            summaries[i] = float(np.median(values))
+        return summaries, None, None, peak_centers, gate_bounds
+
+    lows = np.empty(len(gated), dtype=float)
+    highs = np.empty(len(gated), dtype=float)
+    rng = rng or np.random.default_rng()
+    for i, values in enumerate(gated):
+        med, lo, hi = bootstrap_median_ci(
+            values,
+            ci_percent=ci_percent,
+            n_boot=n_boot,
+            max_events=max_events,
+            rng=rng,
+        )
+        summaries[i] = med
+        lows[i] = lo
+        highs[i] = hi
+    return summaries, lows, highs, peak_centers, gate_bounds
 
 
 def bootstrap_median_ci(
@@ -138,28 +426,20 @@ def channel_median_and_bounds(
     max_events: int = 20_000,
     rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
-    """Per-file medians and optional bootstrap CI bounds from the same events."""
-    medians = np.empty(len(values_per_file), dtype=float)
-    if error == "none":
-        for i, values in enumerate(values_per_file):
-            medians[i] = float(np.median(values))
-        return medians, None, None
-
-    lows = np.empty(len(values_per_file), dtype=float)
-    highs = np.empty(len(values_per_file), dtype=float)
-    rng = rng or np.random.default_rng()
-    for i, values in enumerate(values_per_file):
-        med, lo, hi = bootstrap_median_ci(
-            values,
-            ci_percent=ci_percent,
-            n_boot=n_boot,
-            max_events=max_events,
-            rng=rng,
-        )
-        medians[i] = med
-        lows[i] = lo
-        highs[i] = hi
-    return medians, lows, highs
+    """Per-file medians and optional bootstrap CI bounds (legacy median-only API)."""
+    summaries, lows, highs, _, _ = channel_summary_and_bounds(
+        values_per_file,
+        "median",
+        error,
+        "none",
+        half_decades=0.5,
+        min_events=1,
+        ci_percent=ci_percent,
+        n_boot=n_boot,
+        max_events=max_events,
+        rng=rng,
+    )
+    return summaries, lows, highs
 
 
 def median_channel(path: str, channel: str, *, channel_naming: str = "$PnS") -> float:

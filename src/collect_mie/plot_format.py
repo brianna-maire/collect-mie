@@ -25,6 +25,22 @@ def fmt_particle_n(n_real: float, n_imag: float = 0.0) -> str:
     return f"{fmt_n(n_real)}{float(n_imag):+.4f}j"
 
 
+def format_beam_waist_note(
+    waist_um_y: float,
+    waist_um_z: float,
+    *,
+    prefix: str = ", ",
+) -> str:
+    """Excitation waist description for titles (lab frame, µm)."""
+    if abs(waist_um_y - waist_um_z) <= 1e-6 * max(abs(waist_um_y), abs(waist_um_z), 1.0):
+        body = f"Gaussian beam (w₀={waist_um_y:g} µm)"
+    else:
+        body = (
+            f"elliptical Gaussian (w_y={waist_um_y:g} µm, w_z={waist_um_z:g} µm)"
+        )
+    return f"{prefix}{body}"
+
+
 def format_ssc_rect_mask_note(
     mask_x: float | None,
     mask_z: float | None,

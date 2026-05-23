@@ -16,13 +16,7 @@ from collect_mie.core import (
     diameter_sweep_detector_cone_rect_mask,
     normalize_relative,
 )
-from collect_mie.plot_format import (
-    fmt_deg,
-    fmt_na,
-    fmt_n,
-    fmt_particle_n,
-    format_ssc_rect_mask_note,
-)
+from collect_mie.plot_title import TitleContext, apply_figure_title, build_figure_title
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
@@ -69,37 +63,26 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     masked_rel = normalize_relative(masked_raw, mode=cfg.normalize)
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    ax.plot(
-        diam_um,
-        cone_rel,
-        label=(
-            f"SSC NA cone only (center={fmt_deg(cfg.ssc_center_deg)}°, "
-            f"alpha={fmt_deg(ssc_alpha)}°)"
-        ),
-    )
-    ax.plot(
-        diam_um,
-        masked_rel,
-        label=(
-            f"SSC{format_ssc_rect_mask_note(cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg, prefix=' ')} "
-            f"(center={fmt_deg(cfg.ssc_center_deg)}°, alpha={fmt_deg(ssc_alpha)}°)"
-        ),
-    )
+    ax.plot(diam_um, cone_rel, label="NA cone only")
+    ax.plot(diam_um, masked_rel, label="cone ∩ rect mask")
 
     ax.set_yscale("log")
     ax.set_xlabel("Diameter (µm)")
     ax.set_ylabel("Relative integrated SSC")
-    ax.set_title(
-        f"Mie SSC vs diameter λ={wl_nm:g} nm (vacuum), n={fmt_particle_n(cfg.n_real, cfg.n_imag)}, "
-        f"n_medium={fmt_n(cfg.n_medium)}\n"
-        f"polarization={cfg.polarization}, signal_mode={cfg.signal_mode}"
-    )
     ax.legend()
     ax.xaxis.set_minor_locator(AutoMinorLocator(5))
     ax.grid(which="major", alpha=0.5)
     ax.grid(which="minor", axis="x", alpha=0.5, linestyle=":", linewidth=0.9)
     ax.grid(which="minor", axis="y", alpha=0.5, linestyle="-", linewidth=0.9)
-    fig.tight_layout()
+    apply_figure_title(
+        fig,
+        build_figure_title(
+            "plot-diameter-ssc-rect-mask",
+            cfg,
+            TitleContext(uses_ssc=True, ssc_alpha=ssc_alpha),
+        ),
+        ax=ax,
+    )
 
     if cfg.output:
         save_figure(fig, cfg.output, dpi=150)

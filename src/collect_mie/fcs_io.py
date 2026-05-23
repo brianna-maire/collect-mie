@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -89,14 +90,24 @@ def _peak_prominences(counts: np.ndarray, peak_indices: np.ndarray) -> np.ndarra
     return prominences
 
 
-def log_histogram_peak_center(
+@dataclass(frozen=True)
+class LogHistogramPeakResult:
+    """Peak-find outcome for one file's log histogram."""
+
+    center: float
+    prominence: float | None
+    relative_prominence: float | None
+    used_median_fallback: bool
+
+
+def log_histogram_peak_find(
     values: np.ndarray,
     *,
     bins: int = 200,
     smooth_bins: int = 3,
     prominence_fraction: float = 0.05,
     selection: PeakSelection = "rightmost_prominent",
-) -> float:
+) -> LogHistogramPeakResult:
     """
     Estimate the bright population center from a log-spaced event histogram.
 
@@ -111,7 +122,12 @@ def log_histogram_peak_center(
     lo = float(np.min(positive))
     hi = float(np.max(positive))
     if lo >= hi:
-        return lo
+        return LogHistogramPeakResult(
+            center=lo,
+            prominence=None,
+            relative_prominence=None,
+            used_median_fallback=True,
+        )
 
     edges = np.logspace(np.log10(lo), np.log10(hi), bins + 1)
     counts, _ = np.histogram(positive, bins=edges)
@@ -124,7 +140,12 @@ def log_histogram_peak_center(
             "log histogram peak find: no local maxima; using median of positive events",
             stacklevel=2,
         )
-        return float(np.median(positive))
+        return LogHistogramPeakResult(
+            center=float(np.median(positive)),
+            prominence=None,
+            relative_prominence=None,
+            used_median_fallback=True,
+        )
 
     prominences = _peak_prominences(counts, peak_idx)
     max_prom = float(np.max(prominences))
@@ -133,7 +154,12 @@ def log_histogram_peak_center(
             "log histogram peak find: zero prominence; using median of positive events",
             stacklevel=2,
         )
-        return float(np.median(positive))
+        return LogHistogramPeakResult(
+            center=float(np.median(positive)),
+            prominence=None,
+            relative_prominence=None,
+            used_median_fallback=True,
+        )
 
     min_prom = prominence_fraction * max_prom
     keep = prominences >= min_prom
@@ -144,11 +170,36 @@ def log_histogram_peak_center(
     cand_prom = prominences[keep]
 
     if selection == "highest_prominence":
-        best = int(candidates[int(np.argmax(cand_prom))])
+        pick = int(np.argmax(cand_prom))
     else:
-        best = int(candidates[int(np.argmax(candidates))])
+        pick = int(np.argmax(candidates))
 
-    return float(centers[best])
+    best = int(candidates[pick])
+    sel_prom = float(cand_prom[pick])
+    return LogHistogramPeakResult(
+        center=float(centers[best]),
+        prominence=sel_prom,
+        relative_prominence=sel_prom / max_prom,
+        used_median_fallback=False,
+    )
+
+
+def log_histogram_peak_center(
+    values: np.ndarray,
+    *,
+    bins: int = 200,
+    smooth_bins: int = 3,
+    prominence_fraction: float = 0.05,
+    selection: PeakSelection = "rightmost_prominent",
+) -> float:
+    """Return only the peak center from :func:`log_histogram_peak_find`."""
+    return log_histogram_peak_find(
+        values,
+        bins=bins,
+        smooth_bins=smooth_bins,
+        prominence_fraction=prominence_fraction,
+        selection=selection,
+    ).center
 
 
 def gate_log_decades(
@@ -213,13 +264,13 @@ def apply_channel_gate(
     for values in values_per_file:
         center: float | None = None
         if gate_center == "peak":
-            center = log_histogram_peak_center(
+            center = log_histogram_peak_find(
                 values,
                 bins=peak_bins,
                 smooth_bins=peak_smooth_bins,
                 prominence_fraction=peak_prominence_fraction,
                 selection=peak_selection,
-            )
+            ).center
             peak_centers.append(center)
         else:
             peak_centers.append(None)
@@ -244,9 +295,9 @@ def _peak_window_gate(
     peak_selection: PeakSelection,
     peak_prominence_fraction: float,
     peak_smooth_bins: int,
-) -> tuple[np.ndarray, float, float, float]:
+) -> tuple[np.ndarray, float, float, LogHistogramPeakResult]:
     """Gate positive events in a log-decade window centered on the histogram peak."""
-    peak = log_histogram_peak_center(
+    peak = log_histogram_peak_find(
         values,
         bins=peak_bins,
         smooth_bins=peak_smooth_bins,
@@ -257,7 +308,7 @@ def _peak_window_gate(
         values,
         half_decades=half_decades,
         min_events=min_events,
-        center=peak,
+        center=peak.center,
     )
     return gated, lo, hi, peak
 
@@ -284,6 +335,7 @@ def channel_summary_and_bounds(
     np.ndarray | None,
     list[float | None],
     list[tuple[float, float] | None],
+    list[LogHistogramPeakResult | None],
 ]:
     """
     Per-file channel summaries and optional bootstrap CI bounds.
@@ -292,11 +344,12 @@ def channel_summary_and_bounds(
     ``peak_gated_median``: peak-centered log-decade window (always), then median of gated
     events, using ``half_decades`` / ``min_events`` for the window width.
 
-    Returns ``(summaries, lows, highs, peak_centers, gate_bounds)``.
+    Returns ``(summaries, lows, highs, peak_centers, gate_bounds, peak_results)``.
     """
     n = len(values_per_file)
     peak_centers: list[float | None] = [None] * n
     gate_bounds: list[tuple[float, float] | None] = [None] * n
+    peak_results: list[LogHistogramPeakResult | None] = [None] * n
 
     if summary == "median":
         if gate == "log_decades":
@@ -318,6 +371,7 @@ def channel_summary_and_bounds(
             rng=rng,
             peak_centers=peak_centers,
             gate_bounds=gate_bounds,
+            peak_results=peak_results,
         )
 
     gated_list: list[np.ndarray] = []
@@ -332,8 +386,9 @@ def channel_summary_and_bounds(
             peak_smooth_bins=peak_smooth_bins,
         )
         gated_list.append(g)
-        peak_centers[i] = peak
+        peak_centers[i] = peak.center
         gate_bounds[i] = (lo, hi)
+        peak_results[i] = peak
 
     return _summaries_from_gated(
         gated_list,
@@ -344,6 +399,7 @@ def channel_summary_and_bounds(
         rng=rng,
         peak_centers=peak_centers,
         gate_bounds=gate_bounds,
+        peak_results=peak_results,
     )
 
 
@@ -357,18 +413,20 @@ def _summaries_from_gated(
     rng: np.random.Generator | None,
     peak_centers: list[float | None],
     gate_bounds: list[tuple[float, float] | None],
+    peak_results: list[LogHistogramPeakResult | None],
 ) -> tuple[
     np.ndarray,
     np.ndarray | None,
     np.ndarray | None,
     list[float | None],
     list[tuple[float, float] | None],
+    list[LogHistogramPeakResult | None],
 ]:
     summaries = np.empty(len(gated), dtype=float)
     if error == "none":
         for i, values in enumerate(gated):
             summaries[i] = float(np.median(values))
-        return summaries, None, None, peak_centers, gate_bounds
+        return summaries, None, None, peak_centers, gate_bounds, peak_results
 
     lows = np.empty(len(gated), dtype=float)
     highs = np.empty(len(gated), dtype=float)
@@ -384,7 +442,7 @@ def _summaries_from_gated(
         summaries[i] = med
         lows[i] = lo
         highs[i] = hi
-    return summaries, lows, highs, peak_centers, gate_bounds
+    return summaries, lows, highs, peak_centers, gate_bounds, peak_results
 
 
 def bootstrap_median_ci(
@@ -427,7 +485,7 @@ def channel_median_and_bounds(
     rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
     """Per-file medians and optional bootstrap CI bounds (legacy median-only API)."""
-    summaries, lows, highs, _, _ = channel_summary_and_bounds(
+    summaries, lows, highs, _, _, _ = channel_summary_and_bounds(
         values_per_file,
         "median",
         error,

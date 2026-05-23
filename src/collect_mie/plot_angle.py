@@ -7,10 +7,10 @@ import sys
 import matplotlib.pyplot as plt
 
 from collect_mie.common import signal_mode_value
-from collect_mie.plot_format import fmt_n, fmt_particle_n
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotAngleConfig
 from collect_mie.core import angular_intensity_curve
+from collect_mie.plot_title import TitleContext, apply_figure_title, build_figure_title
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
@@ -41,13 +41,13 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     ax.plot(theta_deg, intensity, lw=1.2)
     ax.set_xlabel(r"Polar scattering angle $\theta$ (deg)")
     ax.set_ylabel(r"Intensity (1/sr)")
-    ax.set_title(
-        f"Mie scattering  λ={wl_nm:g} nm vacuum  d={cfg.diameter_um:g} µm  "
-        f"n={fmt_particle_n(cfg.n_real, cfg.n_imag)}  n_medium={fmt_n(cfg.n_medium)}"
-    )
     ax.set_yscale("log")
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    apply_figure_title(
+        fig,
+        build_figure_title("plot-angle", cfg, TitleContext()),
+        ax=ax,
+    )
 
     if cfg.output:
         save_figure(fig, cfg.output, dpi=150)

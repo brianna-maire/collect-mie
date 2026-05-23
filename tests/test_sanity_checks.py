@@ -508,21 +508,23 @@ def test_apply_channel_gate_none_passthrough():
 
 
 def test_log_histogram_peak_center_finds_bright_mode():
-    from collect_mie.fcs_io import log_histogram_peak_center
+    from collect_mie.fcs_io import log_histogram_peak_find
 
     rng = np.random.default_rng(0)
     background = rng.lognormal(mean=2.0, sigma=0.4, size=8000)
     cells = rng.lognormal(mean=4.5, sigma=0.15, size=1200)
     values = np.concatenate([background, cells])
-    peak = log_histogram_peak_center(
+    result = log_histogram_peak_find(
         values,
         bins=120,
         smooth_bins=5,
         prominence_fraction=0.05,
         selection="rightmost_prominent",
     )
-    assert peak > float(np.median(values))
-    assert abs(np.log10(peak) - 4.5) < 0.6
+    assert not result.used_median_fallback
+    assert result.relative_prominence is not None
+    assert result.relative_prominence > 0
+    assert result.center > float(np.median(values))
 
 
 def test_channel_summary_peak_gated_median_above_background():
@@ -532,7 +534,7 @@ def test_channel_summary_peak_gated_median_above_background():
     background = rng.lognormal(mean=2.0, sigma=0.35, size=6000)
     cells = rng.lognormal(mean=4.2, sigma=0.12, size=1500)
     values = np.concatenate([background, cells])
-    med, _, _, peaks, bounds = channel_summary_and_bounds(
+    med, _, _, peaks, bounds, peak_meta = channel_summary_and_bounds(
         [values],
         "peak_gated_median",
         "none",
@@ -541,6 +543,8 @@ def test_channel_summary_peak_gated_median_above_background():
         min_events=50,
         peak_bins=100,
     )
+    assert peak_meta[0] is not None
+    assert peak_meta[0].relative_prominence is not None
     assert peaks[0] is not None
     assert bounds[0] is not None
     assert float(med[0]) > float(np.median(values))

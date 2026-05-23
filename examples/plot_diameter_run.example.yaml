@@ -25,7 +25,7 @@ ssc:
 
 plot_diameter:
   # both | fsc | ssc — which detector cones to compute and plot
-  bands: ssc
+  bands: both
   d_min_um: 0.04
   d_max_um: 0.40
   n_diameters: 80

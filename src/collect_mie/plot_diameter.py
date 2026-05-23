@@ -17,17 +17,8 @@ from collect_mie.common import (
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotDiameterConfig
 from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
-from collect_mie.ssc_collection import (
-    diameter_sweep_ssc_from_config,
-    ssc_uses_rect_mask,
-)
-from collect_mie.plot_format import (
-    fmt_deg,
-    fmt_na,
-    fmt_n,
-    fmt_particle_n,
-    format_ssc_rect_mask_note,
-)
+from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
+from collect_mie.plot_title import TitleContext, apply_figure_title, build_figure_title
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
 
 
@@ -79,15 +70,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             signal_mode=smode,
         )
         fsc_rel = normalize_relative(fsc_raw, mode=cfg.normalize)
-        ax.plot(
-            diam_um,
-            fsc_rel,
-            label=(
-                f"FSC annular cone center={fmt_deg(cfg.fsc_center_deg)}°, "
-                f"NA_out={fmt_na(cfg.fsc_na_outer)}, NA_in={fmt_na(cfg.fsc_na_inner)}, "
-                f"alpha_out={fmt_deg(fsc_alpha_outer)}°, alpha_in={fmt_deg(fsc_alpha_inner)}°"
-            ),
-        )
+        ax.plot(diam_um, fsc_rel, label="FSC")
 
     if want_ssc:
         ssc_raw = diameter_sweep_ssc_from_config(
@@ -100,18 +83,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             signal_mode=smode,
         )
         ssc_rel = normalize_relative(ssc_raw, mode=cfg.normalize)
-        mask_note = format_ssc_rect_mask_note(
-            cfg.ssc_mask_half_angle_x_deg,
-            cfg.ssc_mask_half_angle_z_deg,
-        )
-        ax.plot(
-            diam_um,
-            ssc_rel,
-            label=(
-                f"SSC center={fmt_deg(cfg.ssc_center_deg)}°, NA={fmt_na(cfg.ssc_na)}, "
-                f"alpha={fmt_deg(ssc_alpha)}°{mask_note}"
-            ),
-        )
+        ax.plot(diam_um, ssc_rel, label="SSC")
 
     ax.set_yscale("log")
     ax.set_xlabel("Diameter (µm)")
@@ -122,17 +94,26 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     else:
         ax.set_ylabel("Relative integrated scatter")
 
-    ax.set_title(
-        f"Mie Model λ={wl_nm:g} nm (vacuum), n={fmt_particle_n(cfg.n_real, cfg.n_imag)}, "
-        f"n_medium={fmt_n(cfg.n_medium)}, bands={cfg.bands}\n"
-        f"polarization={cfg.polarization}, signal_mode={cfg.signal_mode}"
-    )
     ax.legend()
     ax.xaxis.set_minor_locator(AutoMinorLocator(5))
     ax.grid(which="major", alpha=0.5)
     ax.grid(which="minor", axis="x", alpha=0.5, linestyle=":", linewidth=0.9)
     ax.grid(which="minor", axis="y", alpha=0.5, linestyle="-", linewidth=0.9)
-    fig.tight_layout()
+    apply_figure_title(
+        fig,
+        build_figure_title(
+            "plot-diameter",
+            cfg,
+            TitleContext(
+                uses_fsc=want_fsc,
+                uses_ssc=want_ssc,
+                fsc_alpha_outer=fsc_alpha_outer if want_fsc else None,
+                fsc_alpha_inner=fsc_alpha_inner if want_fsc else None,
+                ssc_alpha=ssc_alpha if want_ssc else None,
+            ),
+        ),
+        ax=ax,
+    )
 
     if cfg.output:
         save_figure(fig, cfg.output, dpi=150)

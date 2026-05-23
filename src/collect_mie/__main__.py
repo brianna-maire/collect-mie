@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 
+from collect_mie.plot_title import COMMAND_ALIASES
 from collect_mie.run_config import COMMAND_TARGETS, dispatch_config, resolve_config_path
 
 
@@ -25,7 +26,10 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _print_help() -> None:
-    commands = "\n".join(f"  {name}" for name in sorted(COMMAND_TARGETS))
+    commands = "\n".join(
+        f"  {name:<32}  {COMMAND_ALIASES.get(name, name)}"
+        for name in sorted(COMMAND_TARGETS)
+    )
     print(
         "Usage: collect-mie CONFIG.yaml\n"
         "       collect-mie --config CONFIG.yaml\n\n"

@@ -10,6 +10,8 @@ from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import AutoMinorLocator, LogLocator
 
 from collect_mie.common import (
@@ -23,16 +25,15 @@ from collect_mie.config_schema import CompareFcsConfig
 from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
 from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.fcs_io import (
+    LogHistogramPeakResult,
     channel_summary_and_bounds,
     load_manifest_rows,
     read_channel,
 )
-from collect_mie.plot_format import (
-    fmt_deg,
-    fmt_na,
-    fmt_n,
-    fmt_particle_n,
-    format_ssc_rect_mask_note,
+from collect_mie.plot_title import (
+    TitleContext,
+    apply_figure_title,
+    build_figure_title,
 )
 from collect_mie.run_config import resolve_config_path, write_run_record
 
@@ -191,6 +192,7 @@ def _summarize_channel_values(
     np.ndarray | None,
     list[float | None],
     list[tuple[float, float] | None],
+    list[LogHistogramPeakResult | None],
 ]:
     with warnings.catch_warnings():
         warnings.simplefilter("default", category=UserWarning)
@@ -332,8 +334,46 @@ def _draw_ls_fit_panels(
     ax_resid.grid(True, alpha=0.3)
 
 
+def _peak_selection_label(selection: str) -> str:
+    if selection == "highest_prominence":
+        return "highest prominence"
+    return "rightmost prominent"
+
+
+def _ssc_histogram_title_lines(cfg: CompareFcsConfig, channel_label: str) -> list[str]:
+    lines = [f"Analysis: SSC histograms — {channel_label}"]
+    if cfg.channel_summary == "peak_gated_median":
+        lines.append(
+            f"summary={cfg.channel_summary}, peak: "
+            f"{_peak_selection_label(cfg.peak_selection)}, "
+            f"prom≥{cfg.peak_prominence_fraction:.0%} of max, "
+            f"smooth={cfg.peak_smooth_bins} bins, "
+            f"hist={cfg.peak_histogram_bins} bins"
+        )
+        lines.append(
+            f"gate: ±{cfg.median_gate_log_decades:g} log decades "
+            f"(min {cfg.median_gate_min_events} events)"
+        )
+    else:
+        lines.append(f"summary={cfg.channel_summary}")
+        if cfg.median_gate == "log_decades":
+            lines.append(
+                f"gate: median-centered ±{cfg.median_gate_log_decades:g} log decades "
+                f"(min {cfg.median_gate_min_events} events)"
+            )
+        else:
+            lines.append("gate: none")
+    if cfg.median_error == "bootstrap":
+        lines.append(
+            f"median CI: {cfg.median_ci_percent:g}% bootstrap "
+            f"(n={cfg.median_bootstrap_n})"
+        )
+    return lines
+
+
 def _plot_ssc_histograms(
     *,
+    cfg: CompareFcsConfig,
     diam_um: np.ndarray,
     paths: list[str],
     channel_label: str,
@@ -398,17 +438,21 @@ def _plot_ssc_histograms(
         ax.set_title(f"d = {diam_um[i]:g} µm\n{Path(paths[i]).name}", fontsize=9)
         ax.set_xlabel(channel_label)
         ax.set_ylabel("Events")
-        note = f"{summary_label} = {summary:.6g}"
+        note_lines = [f"{summary_label} = {summary:.6g}"]
         if peak is not None:
-            note += f"\npeak = {peak:.6g}"
+            note_lines.append(f"peak = {peak:.6g}")
+        bounds = gate_bounds[i]
+        if bounds is not None:
+            gate_lo, gate_hi = bounds
+            note_lines.append(f"gate [{gate_lo:.4g}, {gate_hi:.4g}]")
         ax.text(
+            0.03,
             0.97,
-            0.95,
-            note,
+            "\n".join(note_lines),
             transform=ax.transAxes,
-            ha="right",
+            ha="left",
             va="top",
-            fontsize=9,
+            fontsize=8,
             bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
         )
         ax.grid(True, alpha=0.25)
@@ -416,8 +460,45 @@ def _plot_ssc_histograms(
     for j in range(n, len(axes_flat)):
         axes_flat[j].set_visible(False)
 
-    fig.suptitle(f"SSC histograms — {channel_label}", fontsize=11)
-    fig.tight_layout()
+    summary_line = (
+        f"{summary_label} (used in compare plot)"
+        if cfg.channel_summary == "peak_gated_median"
+        else summary_label
+    )
+    legend_handles = [
+        Patch(facecolor="C1", alpha=0.75, edgecolor="white", label="events"),
+        Line2D(
+            [0], [0], color="0.45", linestyle=":", linewidth=1.2, label="gate bounds"
+        ),
+        Line2D(
+            [0], [0], color="C2", linestyle="-.", linewidth=1.2, label="peak center"
+        ),
+        Line2D(
+            [0],
+            [0],
+            color="C3",
+            linestyle="--",
+            linewidth=1.5,
+            label=summary_line,
+        ),
+    ]
+    apply_figure_title(
+        fig,
+        "\n".join(_ssc_histogram_title_lines(cfg, channel_label)),
+        use_suptitle=True,
+        rect_bottom=0.07,
+        title_fontsize=10,
+        title_line_spacing=0.015,
+        band_trim_lines=0.0,
+    )
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.02),
+        ncol=2,
+        fontsize=8,
+        framealpha=0.9,
+    )
 
     if hist_output:
         _save_figure(fig, hist_output)
@@ -445,7 +526,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             read_channel(p, cfg.fsc_channel, channel_naming=cfg.channel_naming)[1]
             for p in paths
         ]
-        fsc_med, fsc_lo, fsc_hi, _, _ = _summarize_channel_values(fsc_per_file, cfg)
+        fsc_med, fsc_lo, fsc_hi, _, _, _ = _summarize_channel_values(fsc_per_file, cfg)
     ssc_col, ssc_values = read_channel(
         paths[0], cfg.ssc_channel, channel_naming=cfg.channel_naming
     )
@@ -459,9 +540,14 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
                 f"SSC column name mismatch: {ssc_col!r} vs {col!r} in {p!r}"
             )
         ssc_per_file.append(values)
-    ssc_med, ssc_lo, ssc_hi, ssc_peak_centers, ssc_gate_bounds = (
-        _summarize_channel_values(ssc_per_file, cfg)
-    )
+    (
+        ssc_med,
+        ssc_lo,
+        ssc_hi,
+        ssc_peak_centers,
+        ssc_gate_bounds,
+        _,
+    ) = _summarize_channel_values(ssc_per_file, cfg)
     ssc_alpha = ssc_half_angle_deg(cfg.ssc_na, cfg.n_medium)
     ssc_min, ssc_max = resolve_ssc_band_deg(
         ssc_na=cfg.ssc_na,
@@ -650,27 +736,20 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     ax_ssc.set_yscale("log")
     _style_compare_median_axis(ax_ssc)
 
-    title_lines = [
-        f"λ={wl_nm:g} nm,  n={fmt_particle_n(cfg.n_real, cfg.n_imag)},  "
-        f"n_medium={fmt_n(cfg.n_medium)}",
-    ]
-    ls_fit_line: str | None = None
+    extra_title_lines: list[str] = []
     if use_instrument_units:
-        cal_parts = []
         if plot_fsc and fsc_ls_scale is not None:
             fsc_r2, fsc_rmse = fit_metrics(fsc_exp, fsc_model)
-            cal_parts.append(
+            extra_title_lines.append(
                 _format_ls_cal_line(
                     str(cfg.fsc_channel), fsc_ls_scale, fsc_r2, fsc_rmse
                 )
             )
         if ssc_ls_scale is not None:
             ssc_r2, ssc_rmse = fit_metrics(ssc_exp, ssc_model)
-            cal_parts.append(
+            extra_title_lines.append(
                 _format_ls_cal_line(cfg.ssc_channel, ssc_ls_scale, ssc_r2, ssc_rmse)
             )
-        if cal_parts:
-            ls_fit_line = "LS fit: " + "; ".join(cal_parts)
 
     for (ax_parity, ax_resid), (name, obs, fit, yerr, color) in zip(
         ls_panel_axes, ls_diag_channels
@@ -685,21 +764,19 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             yerr=yerr,
             color=color,
         )
-    if plot_fsc:
-        title_lines.append(
-            f"FSC(center={fmt_deg(cfg.fsc_center_deg)}°, NA_out={fmt_na(cfg.fsc_na_outer)}, "
-            f"NA_in={fmt_na(cfg.fsc_na_inner)})"
-        )
-    title_lines.append(
-        f"SSC(center={fmt_deg(cfg.ssc_center_deg)}°, NA={fmt_na(cfg.ssc_na)})"
-        f"{format_ssc_rect_mask_note(cfg.ssc_mask_half_angle_x_deg, cfg.ssc_mask_half_angle_z_deg)}"
+    title_ctx = TitleContext(
+        uses_fsc=plot_fsc,
+        uses_ssc=True,
+        fsc_alpha_outer=fsc_alpha_outer if plot_fsc else None,
+        fsc_alpha_inner=fsc_alpha_inner if plot_fsc else None,
+        ssc_alpha=ssc_alpha,
+        extra_lines=extra_title_lines,
     )
-    if ls_fit_line is not None:
-        title_lines.append(ls_fit_line)
-
-    fig.suptitle("\n".join(title_lines))
-    if not embed_ls_panels:
-        fig.tight_layout()
+    apply_figure_title(
+        fig,
+        build_figure_title("compare-fcs", cfg, title_ctx),
+        use_suptitle=True,
+    )
 
     hist_output = resolve_ssc_histogram_output(cfg.output, cfg.ssc_histogram_output)
 
@@ -709,6 +786,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         plt.show()
 
     _plot_ssc_histograms(
+        cfg=cfg,
         diam_um=diam_exp_um,
         paths=paths,
         channel_label=ssc_col,

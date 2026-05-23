@@ -50,6 +50,28 @@ def resolve_ssc_histogram_output(
     return None
 
 
+def _relative_to_fitted(observed: np.ndarray, fitted: np.ndarray) -> np.ndarray:
+    """Fractional residual ``(observed - fitted) / fitted`` (NaN where ``|fitted|`` ~ 0)."""
+    obs = np.asarray(observed, dtype=float)
+    fit = np.asarray(fitted, dtype=float)
+    scale = max(float(np.max(np.abs(fit))), float(np.max(np.abs(obs))), 1.0)
+    eps = np.finfo(float).eps * scale
+    safe_fit = np.where(np.abs(fit) > eps, fit, np.nan)
+    return (obs - fit) / safe_fit
+
+
+def _relative_yerr_to_fitted(
+    yerr: np.ndarray | None, fitted: np.ndarray
+) -> np.ndarray | None:
+    """Scale absolute observed uncertainties to fractional error vs fitted."""
+    if yerr is None:
+        return None
+    fit = np.asarray(fitted, dtype=float)
+    scale = max(float(np.max(np.abs(fit))), 1.0)
+    eps = np.finfo(float).eps * scale
+    return np.asarray(yerr, dtype=float) / np.where(np.abs(fit) > eps, np.abs(fit), np.nan)
+
+
 def fit_metrics(observed: np.ndarray, fitted: np.ndarray) -> tuple[float, float]:
     """R² through origin and RMSE for observed vs fitted values at manifest diameters."""
     obs = np.asarray(observed, dtype=float)
@@ -277,7 +299,8 @@ def _draw_ls_fit_panels(
     color: str,
 ) -> None:
     """Parity and residual panels for one channel's LS fit."""
-    resid = observed - fitted
+    resid = _relative_to_fitted(observed, fitted)
+    rel_yerr = _relative_yerr_to_fitted(yerr, fitted)
 
     lo = float(min(np.min(observed), np.min(fitted)))
     hi = float(max(np.max(observed), np.max(fitted)))
@@ -315,22 +338,23 @@ def _draw_ls_fit_panels(
     ax_parity.set_title(f"{name}: parity")
     ax_parity.grid(True, alpha=0.3)
 
-    if yerr is not None:
+    valid = np.isfinite(resid)
+    if rel_yerr is not None:
         ax_resid.errorbar(
-            diam_um,
-            resid,
-            yerr=yerr,
+            diam_um[valid],
+            resid[valid],
+            yerr=rel_yerr[valid],
             fmt="o",
             color=color,
             capsize=3,
             linestyle="none",
         )
     else:
-        ax_resid.scatter(diam_um, resid, color=color, s=36, zorder=5)
+        ax_resid.scatter(diam_um[valid], resid[valid], color=color, s=36, zorder=5)
     ax_resid.axhline(0.0, color="k", linestyle="--", linewidth=1, alpha=0.6)
     ax_resid.set_xlabel("Diameter (µm)")
-    ax_resid.set_ylabel("Observed − fitted")
-    ax_resid.set_title(f"{name}: residuals")
+    ax_resid.set_ylabel("(observed − fitted) / fitted")
+    ax_resid.set_title(f"{name}: relative residuals")
     ax_resid.grid(True, alpha=0.3)
 
 

@@ -507,6 +507,15 @@ def test_apply_channel_gate_none_passthrough():
     np.testing.assert_array_equal(out[0], vals[0])
 
 
+def test_relative_to_fitted_residual():
+    from collect_mie.compare_fcs import _relative_to_fitted
+
+    obs = np.array([100.0, 1000.0, 10_000.0])
+    fit = np.array([80.0, 1200.0, 8000.0])
+    rel = _relative_to_fitted(obs, fit)
+    np.testing.assert_allclose(rel, [0.25, -1.0 / 6.0, 0.25], rtol=1e-9)
+
+
 def test_log_histogram_peak_center_finds_bright_mode():
     from collect_mie.fcs_io import log_histogram_peak_find
 

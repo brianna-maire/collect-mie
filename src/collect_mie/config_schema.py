@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from collect_mie.defaults import (
     DEFAULT_FSC_CENTER_DEG,
+    DEFAULT_FSC_MASK_HALF_ANGLE_Y_DEG,
+    DEFAULT_FSC_MASK_HALF_ANGLE_Z_DEG,
     DEFAULT_FSC_NA_INNER,
     DEFAULT_FSC_NA_OUTER,
     DEFAULT_N_MEDIUM,
@@ -80,6 +82,43 @@ class FscBand(_Strict):
     fsc_na_inner: float = DEFAULT_FSC_NA_INNER
 
 
+class FscOptionalRectMask(_Strict):
+    """
+    When both mask half-angles are set in YAML (fsc: mask_half_angle_y/z_deg),
+    FSC integration uses (outer NA cone) \\ lab rect bar centered on +x; na_inner is
+    ignored. Bar limits are |arctan2(k_y, k_x)| and |arctan2(k_z, k_x)| in the same
+    fixed lab frame as the SSC mask (which is centered on +y with mask_x / mask_z).
+    """
+
+    fsc_mask_half_angle_y_deg: float | None = None
+    fsc_mask_half_angle_z_deg: float | None = None
+    fsc_rect_mask_n_phi: int = Field(default=720, ge=8)
+
+    @model_validator(mode="after")
+    def check_mask_pair(self) -> FscOptionalRectMask:
+        y, z = self.fsc_mask_half_angle_y_deg, self.fsc_mask_half_angle_z_deg
+        if (y is None) ^ (z is None):
+            raise ValueError(
+                "set both fsc_mask_half_angle_y_deg and fsc_mask_half_angle_z_deg "
+                "in fsc:, or omit both to use circular na_inner obscuration"
+            )
+        if y is not None and (y <= 0 or z <= 0):
+            raise ValueError("mask half-angles must be positive when set")
+        return self
+
+
+class FscRectMaskRequired(_Strict):
+    """Required mask defaults for plot-diameter-fsc-rect-mask comparison runs."""
+
+    fsc_mask_half_angle_y_deg: float = DEFAULT_FSC_MASK_HALF_ANGLE_Y_DEG
+    fsc_mask_half_angle_z_deg: float = DEFAULT_FSC_MASK_HALF_ANGLE_Z_DEG
+    fsc_rect_mask_n_phi: int = Field(default=720, ge=8)
+
+
+class FscBandMixin(FscBand, FscOptionalRectMask):
+    """FSC band + optional rectangular mask subtraction (shared by collection helpers)."""
+
+
 class SscBand(_Strict):
     ssc_center_deg: float = DEFAULT_SSC_CENTER_DEG
     ssc_na: float = DEFAULT_SSC_NA
@@ -147,7 +186,7 @@ class PlotAngleConfig(MediumOptics, ParticleOptics, RunOutputFields):
 
 
 class PlotDiameterConfig(
-    MediumOptics, ParticleOptics, FscBand, SscBandMixin, DiameterSweep, RunOutputFields
+    MediumOptics, ParticleOptics, FscBandMixin, SscBandMixin, DiameterSweep, RunOutputFields
 ):
     bands: BandsChoice = "both"
     normalize: NormalizeSimple = "max"
@@ -196,8 +235,14 @@ class PlotDiameterSscRectMaskConfig(
     normalize: NormalizeSimple = "max"
 
 
+class PlotDiameterFscRectMaskConfig(
+    MediumOptics, ParticleOptics, FscBand, FscRectMaskRequired, DiameterSweep, RunOutputFields
+):
+    normalize: NormalizeSimple = "max"
+
+
 class CompareFcsConfig(
-    MediumOptics, ParticleOptics, FscBand, SscBandMixin, DiameterSweep, RunOutputFields
+    MediumOptics, ParticleOptics, FscBandMixin, SscBandMixin, DiameterSweep, RunOutputFields
 ):
     manifest: str
     fsc_channel: str | None = None

@@ -41,6 +41,21 @@ def format_beam_waist_note(
     return f"{prefix}{body}"
 
 
+def format_fsc_rect_mask_note(
+    mask_y: float | None,
+    mask_z: float | None,
+    *,
+    prefix: str = ", ",
+) -> str:
+    """Title/legend suffix when FSC uses outer NA cone minus lab +x rect bar."""
+    if mask_y is None or mask_z is None:
+        return ""
+    return (
+        f"{prefix}NA cone w\\ rect bar"
+        f"(mask_y={fmt_deg(mask_y)}°, mask_z={fmt_deg(mask_z)}°)"
+    )
+
+
 def format_ssc_rect_mask_note(
     mask_x: float | None,
     mask_z: float | None,

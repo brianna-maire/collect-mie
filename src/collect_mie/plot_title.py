@@ -18,6 +18,7 @@ from collect_mie.plot_format import (
     fmt_n,
     fmt_particle_n,
     format_beam_waist_note,
+    format_fsc_rect_mask_note,
     format_ssc_rect_mask_note,
 )
 
@@ -28,6 +29,7 @@ COMMAND_ALIASES: dict[str, str] = {
     "plot-refractive-index": "SSC vs particle diameter",
     "plot-ssc-vs-na": "SSC vs numerical aperture",
     "plot-diameter-ssc-rect-mask": "SSC cone vs rectangular mask",
+    "plot-diameter-fsc-rect-mask": "FSC annular NA vs rectangular bar",
     "compare-fcs": "Scatter Data vs Mie model",
     "plot-angle-beam": "GLMT angular intensity",
     "plot-diameter-beam": "GLMT integrated scatter vs diameter",
@@ -52,6 +54,8 @@ class _HasFsc(Protocol):
     fsc_center_deg: float
     fsc_na_outer: float
     fsc_na_inner: float
+    fsc_mask_half_angle_y_deg: float | None
+    fsc_mask_half_angle_z_deg: float | None
 
 
 class _HasSscGeometry(Protocol):
@@ -105,15 +109,24 @@ def _line_beam(cfg: _HasBeam) -> str:
     return f"Excitation:{waist}; PW ratio={cfg.plane_wave_waist_ratio:g}"
 
 
+def _fsc_collection_note(cfg: _HasFsc) -> str:
+    mask = format_fsc_rect_mask_note(
+        cfg.fsc_mask_half_angle_y_deg,
+        cfg.fsc_mask_half_angle_z_deg,
+        prefix="",
+    )
+    if mask:
+        return mask
+    return "annular NA"
+
+
 def _line_fsc(cfg: _HasFsc, ctx: TitleContext) -> str:
-    parts = [
-        f"FSC: center={fmt_deg(cfg.fsc_center_deg)}°, "
-        f"NA_out={fmt_na(cfg.fsc_na_outer)}, NA_in={fmt_na(cfg.fsc_na_inner)}"
-    ]
+    parts = [f"FSC: center={fmt_deg(cfg.fsc_center_deg)}°"]
     if ctx.fsc_alpha_outer is not None and ctx.fsc_alpha_inner is not None:
         parts.append(
             f"α_out={fmt_deg(ctx.fsc_alpha_outer)}°, α_in={fmt_deg(ctx.fsc_alpha_inner)}°"
         )
+    parts.append(f"collection={_fsc_collection_note(cfg)}")
     return ", ".join(parts)
 
 
@@ -165,6 +178,9 @@ def _line_command(command: str, cfg: BaseModel) -> str | None:
         c = cfg
         return f""
     if command == "plot-diameter-ssc-rect-mask":
+        c = cfg
+        return f"d={c.d_min_um:g}–{c.d_max_um:g} µm, normalize={c.normalize}"
+    if command == "plot-diameter-fsc-rect-mask":
         c = cfg
         return f"d={c.d_min_um:g}–{c.d_max_um:g} µm, normalize={c.normalize}"
     if command in ("compare-fcs", "compare-fcs-beam"):
@@ -312,7 +328,8 @@ def apply_figure_title(
     y_top = (
         axes_top
         + band
-        - _scaled_line_spacing(line_spacing, title_fontsize) * _FIGURE_TITLE_TOP_INSET_LINES
+        - _scaled_line_spacing(line_spacing, title_fontsize)
+        * _FIGURE_TITLE_TOP_INSET_LINES
     )
     _draw_figure_title_lines(
         fig, title, y_top=y_top, fontsize=title_fontsize, line_spacing=line_spacing

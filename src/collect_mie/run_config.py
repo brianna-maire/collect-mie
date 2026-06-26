@@ -18,6 +18,7 @@ COMMAND_TARGETS: dict[str, str] = {
     "plot-refractive-index": "collect_mie.plot_refractive_index:main",
     "plot-ssc-vs-na": "collect_mie.plot_ssc_vs_na:main",
     "plot-diameter-ssc-rect-mask": "collect_mie.plot_diameter_ssc_rect_mask:main",
+    "plot-diameter-fsc-rect-mask": "collect_mie.plot_diameter_fsc_rect_mask:main",
     "compare-fcs": "collect_mie.compare_fcs:main",
 }
 

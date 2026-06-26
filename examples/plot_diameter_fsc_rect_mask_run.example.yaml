@@ -1,0 +1,31 @@
+# Run: collect-mie examples/plot_diameter_fsc_rect_mask_run.example.yaml
+
+run:
+  command: plot-diameter-fsc-rect-mask
+  args:
+    output: examples/output/plot_diameter_fsc_rect_mask.png
+    write_run_record: examples/output/plot_diameter_fsc_rect_mask_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.6020
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+fsc:
+  na_outer: 0.164
+  na_inner: 0.053
+
+plot_diameter_fsc_rect_mask:
+  na_outer: 0.164
+  mask_half_angle_y_deg: 2.3
+  mask_half_angle_z_deg: 7.1
+
+plot_diameter:
+  bands: fsc
+  d_min_um: 5
+  d_max_um: 40
+  n_diameters: 250
+  normalize: max

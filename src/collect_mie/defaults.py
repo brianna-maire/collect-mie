@@ -15,6 +15,11 @@ DEFAULT_FSC_CENTER_DEG = 0.0
 DEFAULT_FSC_NA_OUTER = 0.34
 DEFAULT_FSC_NA_INNER = 0.23
 
+# Rectangular lab bar (half-angles x/z, deg) subtracted from the outer FSC lens cone
+# when both mask angles are set; bar is centered on lab +x (see _fsc_rect_bar_membership).
+DEFAULT_FSC_MASK_HALF_ANGLE_Y_DEG = 10.0
+DEFAULT_FSC_MASK_HALF_ANGLE_Z_DEG = 10.0
+
 DEFAULT_SSC_CENTER_DEG = 90.0
 # Numerical aperture that defines SSC collection half-angle as:
 #   alpha = asin(NA / n_medium)

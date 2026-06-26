@@ -16,17 +16,17 @@ mie:
 
 fsc:
   center_deg: 0.0
-  na_outer: 0.34
-  na_inner: 0.23
+  na_outer: 0.164 #0.34
+  na_inner: 0.053 #0.23
 
 ssc:
-  center_deg: 90.0
+  center_deg: 91.0
   na: 1.29
 
 plot_diameter:
   # both | fsc | ssc — which detector cones to compute and plot
-  bands: both
-  d_min_um: 0.04
-  d_max_um: 0.40
-  n_diameters: 80
+  bands: fsc
+  d_min_um: .5 #0.04
+  d_max_um: 40 #0.40
+  n_diameters: 250 #80
   normalize: max

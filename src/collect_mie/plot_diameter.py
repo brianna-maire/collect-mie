@@ -16,7 +16,8 @@ from collect_mie.common import (
 )
 from collect_mie.config import load_config
 from collect_mie.config_schema import PlotDiameterConfig
-from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
+from collect_mie.core import normalize_relative
+from collect_mie.fsc_collection import diameter_sweep_fsc_from_config
 from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.plot_title import TitleContext, apply_figure_title, build_figure_title
 from collect_mie.run_config import resolve_config_path, save_figure, write_run_record
@@ -58,12 +59,11 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
     if want_fsc:
-        fsc_raw = diameter_sweep_detector_annular_cone(
+        fsc_raw = diameter_sweep_fsc_from_config(
             n_particle,
             diam_nm,
             wl_nm,
-            cfg.n_medium,
-            cfg.fsc_center_deg,
+            cfg,
             fsc_alpha_outer,
             fsc_alpha_inner,
             polarization=cfg.polarization,

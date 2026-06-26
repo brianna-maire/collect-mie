@@ -11,6 +11,7 @@ from collect_mie.config_schema import (
     CompareFcsConfig,
     PlotAngleConfig,
     PlotDiameterConfig,
+    PlotDiameterFscRectMaskConfig,
     PlotDiameterSscRectMaskConfig,
     PlotRefractiveIndexConfig,
     PlotSscVsNaConfig,
@@ -24,6 +25,7 @@ CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "plot-refractive-index": PlotRefractiveIndexConfig,
     "plot-ssc-vs-na": PlotSscVsNaConfig,
     "plot-diameter-ssc-rect-mask": PlotDiameterSscRectMaskConfig,
+    "plot-diameter-fsc-rect-mask": PlotDiameterFscRectMaskConfig,
     "compare-fcs": CompareFcsConfig,
 }
 
@@ -38,7 +40,8 @@ def load_config(config_path: str, command_name: str) -> BaseModel:
     flat = merge_config_dict(
         raw,
         command_name=command_name,
-        include_fsc=command_name in ("plot-diameter", "compare-fcs"),
+        include_fsc=command_name
+        in ("plot-diameter", "compare-fcs", "plot-diameter-fsc-rect-mask"),
         include_ssc=command_name
         in (
             "plot-diameter",
@@ -77,7 +80,13 @@ def merge_config_dict(
             out,
             raw.get("fsc"),
             prefix="fsc_",
-            aliases={"center_deg": "center_deg", "na_outer": "na_outer", "na_inner": "na_inner"},
+            aliases={
+                "center_deg": "center_deg",
+                "na_outer": "na_outer",
+                "na_inner": "na_inner",
+                "mask_half_angle_y_deg": "mask_half_angle_y_deg",
+                "mask_half_angle_z_deg": "mask_half_angle_z_deg",
+            },
         )
     if include_ssc:
         _merge_prefixed(
@@ -95,8 +104,12 @@ def merge_config_dict(
         _merge_ssc_na_sweep_section(out, raw.get("ssc"))
 
     cmd_us = command_name.replace("-", "_")
-    _merge(out, raw.get(command_name))
-    _merge(out, raw.get(cmd_us))
+    if command_name == "plot-diameter-fsc-rect-mask":
+        _merge_fsc_rect_mask_plot_section(out, raw.get(cmd_us))
+        _merge_plot_diameter_sweep_fields(out, raw.get("plot_diameter"))
+    else:
+        _merge(out, raw.get(command_name))
+        _merge(out, raw.get(cmd_us))
     _merge(out, raw.get("args"))
 
     run = raw.get("run")
@@ -109,6 +122,37 @@ def merge_config_dict(
 def _merge(dst: dict[str, Any], src: Any) -> None:
     if isinstance(src, dict):
         dst.update(src)
+
+
+def _merge_plot_diameter_sweep_fields(dst: dict[str, Any], src: Any) -> None:
+    """Copy diameter-sweep keys from a ``plot_diameter:`` block."""
+    if not isinstance(src, dict):
+        return
+    for key in ("d_min_um", "d_max_um", "n_diameters", "normalize"):
+        if key in src:
+            dst[key] = src[key]
+
+
+def _merge_fsc_rect_mask_plot_section(dst: dict[str, Any], src: Any) -> None:
+    if not isinstance(src, dict):
+        return
+    flat = {
+        "center_deg": "fsc_center_deg",
+        "fsc_center_deg": "fsc_center_deg",
+        "na_outer": "fsc_na_outer",
+        "fsc_na_outer": "fsc_na_outer",
+        "na_inner": "fsc_na_inner",
+        "fsc_na_inner": "fsc_na_inner",
+        "mask_half_angle_y_deg": "fsc_mask_half_angle_y_deg",
+        "mask_half_angle_z_deg": "fsc_mask_half_angle_z_deg",
+        "rect_mask_n_phi": "fsc_rect_mask_n_phi",
+    }
+    for key, value in src.items():
+        dest = flat.get(key, key if key.startswith("fsc_") else None)
+        if dest is not None:
+            dst[dest] = value
+        elif key in ("d_min_um", "d_max_um", "n_diameters", "normalize", "output", "write_run_record"):
+            dst[key] = value
 
 
 def _merge_ssc_na_sweep_section(dst: dict[str, Any], src: Any) -> None:

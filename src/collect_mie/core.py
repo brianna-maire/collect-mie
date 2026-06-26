@@ -277,6 +277,227 @@ def integrate_detector_cone_rect_mask(
     return float(trapezoid(integrand, theta))
 
 
+def _fsc_rect_bar_membership(
+    kx: np.ndarray,
+    ky: np.ndarray,
+    kz: np.ndarray,
+    lim_y: float,
+    lim_z: float,
+) -> np.ndarray:
+    """
+    True where direction lies inside the FSC obscuration bar (fixed lab frame).
+
+    Bar centered on lab +x (y=0, z=0): |arctan2(k_y, k_x)| <= lim_y and
+    |arctan2(k_z, k_x)| <= lim_z. SSC uses the same lab frame centered on +y.
+    """
+    ay = np.arctan2(ky, kx)
+    az = np.arctan2(kz, kx)
+    return (np.abs(ay) <= lim_y) & (np.abs(az) <= lim_z)
+
+
+def integrate_detector_cone_minus_fsc_rect_bar(
+    n_particle: complex,
+    diameter: float,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    detector_half_angle_deg: float,
+    mask_half_angle_y_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_points: int = 4000,
+    n_phi: int = 720,
+) -> float:
+    """
+    Integrate collected scatter over (lens cone) \\ (FSC rect obscuration bar).
+
+    The bar is a symmetric rectangle in the fixed lab frame (laser +x, detector +y,
+    vertical +z), centered on +x with half-angles |arctan2(k_y, k_x)| and
+    |arctan2(k_z, k_x)| — configured as ``mask_half_angle_y_deg`` /
+    ``mask_half_angle_z_deg`` in YAML.
+    """
+    if detector_half_angle_deg <= 0:
+        raise ValueError("detector_half_angle_deg must be positive")
+    if detector_half_angle_deg >= 180:
+        raise ValueError("detector_half_angle_deg must be < 180")
+    if mask_half_angle_y_deg <= 0 or mask_half_angle_z_deg <= 0:
+        raise ValueError("mask half-angles (deg) must be positive")
+    if n_phi < 8:
+        raise ValueError("n_phi must be at least 8")
+
+    theta0 = math.radians(detector_center_deg)
+    alpha = math.radians(detector_half_angle_deg)
+    cos_alpha = math.cos(alpha)
+    lim_y = math.radians(mask_half_angle_y_deg)
+    lim_z = math.radians(mask_half_angle_z_deg)
+
+    theta = np.linspace(0.0, np.pi, n_points)
+    mu = np.cos(theta)
+    ipar, iper = _intensity_components(
+        n_particle, diameter, wavelength_vacuum, n_medium, mu, signal_mode
+    )
+    i_int = intensity_for_polarization(ipar, iper, polarization)
+    i_int = _apply_signal_mode_scaling(i_int, diameter, signal_mode)
+
+    phis = np.linspace(0.0, 2.0 * np.pi, n_phi, endpoint=False)
+    dphi = 2.0 * np.pi / float(n_phi)
+    th_grid, ph_grid = np.meshgrid(theta, phis, indexing="ij")
+
+    kx = np.cos(th_grid)
+    ky = np.sin(th_grid) * np.cos(ph_grid)
+    kz = np.sin(th_grid) * np.sin(ph_grid)
+
+    cos_gamma = np.cos(th_grid) * math.cos(theta0) + np.sin(th_grid) * math.sin(
+        theta0
+    ) * np.cos(ph_grid)
+    in_lens = cos_gamma >= cos_alpha
+
+    in_bar = _fsc_rect_bar_membership(kx, ky, kz, lim_y, lim_z)
+    width = np.sum(in_lens & ~in_bar, axis=1) * dphi
+
+    integrand = i_int * width * np.sin(theta)
+    return float(trapezoid(integrand, theta))
+
+
+def integrate_detector_cone_minus_rect_mask(
+    n_particle: complex,
+    diameter: float,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    detector_half_angle_deg: float,
+    mask_half_angle_x_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_points: int = 4000,
+    n_phi: int = 720,
+) -> float:
+    """
+    Integrate collected scatter over the lens cone minus a symmetric rectangular mask.
+
+    Same lab frame and mask definition as ``integrate_detector_cone_rect_mask``;
+    accepted solid angle is (lens cone) \\ (rect mask).
+    """
+    if detector_half_angle_deg <= 0:
+        raise ValueError("detector_half_angle_deg must be positive")
+    if detector_half_angle_deg >= 180:
+        raise ValueError("detector_half_angle_deg must be < 180")
+    if mask_half_angle_x_deg <= 0 or mask_half_angle_z_deg <= 0:
+        raise ValueError("mask half-angles (deg) must be positive")
+    if n_phi < 8:
+        raise ValueError("n_phi must be at least 8")
+
+    theta0 = math.radians(detector_center_deg)
+    alpha = math.radians(detector_half_angle_deg)
+    cos_alpha = math.cos(alpha)
+    lim_x = math.radians(mask_half_angle_x_deg)
+    lim_z = math.radians(mask_half_angle_z_deg)
+
+    theta = np.linspace(0.0, np.pi, n_points)
+    mu = np.cos(theta)
+    ipar, iper = _intensity_components(
+        n_particle, diameter, wavelength_vacuum, n_medium, mu, signal_mode
+    )
+    i_int = intensity_for_polarization(ipar, iper, polarization)
+    i_int = _apply_signal_mode_scaling(i_int, diameter, signal_mode)
+
+    phis = np.linspace(0.0, 2.0 * np.pi, n_phi, endpoint=False)
+    dphi = 2.0 * np.pi / float(n_phi)
+    th_grid, ph_grid = np.meshgrid(theta, phis, indexing="ij")
+
+    kx = np.cos(th_grid)
+    ky = np.sin(th_grid) * np.cos(ph_grid)
+    kz = np.sin(th_grid) * np.sin(ph_grid)
+
+    cos_gamma = np.cos(th_grid) * math.cos(theta0) + np.sin(th_grid) * math.sin(
+        theta0
+    ) * np.cos(ph_grid)
+    in_lens = cos_gamma >= cos_alpha
+
+    ax = np.arctan2(kx, ky)
+    az = np.arctan2(kz, ky)
+    in_rect = (np.abs(ax) <= lim_x) & (np.abs(az) <= lim_z)
+    width = np.sum(in_lens & ~in_rect, axis=1) * dphi
+
+    integrand = i_int * width * np.sin(theta)
+    return float(trapezoid(integrand, theta))
+
+
+def integrate_detector_annular_cone_minus_rect_mask(
+    n_particle: complex,
+    diameter: float,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    outer_half_angle_deg: float,
+    inner_half_angle_deg: float,
+    mask_half_angle_x_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_points: int = 4000,
+    n_phi: int = 720,
+) -> float:
+    """
+    Integrate over an annular lens cone minus a symmetric rectangular mask.
+
+    Collection solid angle is (outer cone \\ inner obscuration) \\ (rect mask).
+    FSC collection helpers do not use this stacking; they apply either circular
+    ``na_inner`` or rect-bar obscuration, not both (see ``fsc_collection``).
+    """
+    if inner_half_angle_deg < 0:
+        raise ValueError("inner_half_angle_deg must be >= 0")
+    if outer_half_angle_deg <= 0:
+        raise ValueError("outer_half_angle_deg must be positive")
+    if inner_half_angle_deg >= outer_half_angle_deg:
+        raise ValueError("inner_half_angle_deg must be smaller than outer_half_angle_deg")
+    if mask_half_angle_x_deg <= 0 or mask_half_angle_z_deg <= 0:
+        raise ValueError("mask half-angles (deg) must be positive")
+    if n_phi < 8:
+        raise ValueError("n_phi must be at least 8")
+
+    theta0 = math.radians(detector_center_deg)
+    cos_out = math.cos(math.radians(outer_half_angle_deg))
+    cos_in = math.cos(math.radians(inner_half_angle_deg))
+    lim_x = math.radians(mask_half_angle_x_deg)
+    lim_z = math.radians(mask_half_angle_z_deg)
+
+    theta = np.linspace(0.0, np.pi, n_points)
+    mu = np.cos(theta)
+    ipar, iper = _intensity_components(
+        n_particle, diameter, wavelength_vacuum, n_medium, mu, signal_mode
+    )
+    i_int = intensity_for_polarization(ipar, iper, polarization)
+    i_int = _apply_signal_mode_scaling(i_int, diameter, signal_mode)
+
+    phis = np.linspace(0.0, 2.0 * np.pi, n_phi, endpoint=False)
+    dphi = 2.0 * np.pi / float(n_phi)
+    th_grid, ph_grid = np.meshgrid(theta, phis, indexing="ij")
+
+    kx = np.cos(th_grid)
+    ky = np.sin(th_grid) * np.cos(ph_grid)
+    kz = np.sin(th_grid) * np.sin(ph_grid)
+
+    cos_gamma = np.cos(th_grid) * math.cos(theta0) + np.sin(th_grid) * math.sin(
+        theta0
+    ) * np.cos(ph_grid)
+    in_outer = cos_gamma >= cos_out
+    in_inner = cos_gamma >= cos_in
+
+    ax = np.arctan2(kx, ky)
+    az = np.arctan2(kz, ky)
+    in_rect = (np.abs(ax) <= lim_x) & (np.abs(az) <= lim_z)
+    width = np.sum(in_outer & ~in_inner & ~in_rect, axis=1) * dphi
+
+    integrand = i_int * width * np.sin(theta)
+    return float(trapezoid(integrand, theta))
+
+
 def _detector_azimuth_width(
     theta: np.ndarray, theta0: float, alpha: float, cos_alpha: float
 ) -> np.ndarray:
@@ -460,6 +681,107 @@ def diameter_sweep_detector_annular_cone(
             inner_half_angle_deg,
             polarization=polarization,
             signal_mode=signal_mode,
+        )
+    return out
+
+
+def diameter_sweep_detector_cone_minus_fsc_rect_bar(
+    n_particle: complex,
+    diameters: np.ndarray,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    detector_half_angle_deg: float,
+    mask_half_angle_y_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_phi: int = 720,
+) -> np.ndarray:
+    """One integrate_detector_cone_minus_fsc_rect_bar per diameter."""
+    out = np.empty_like(diameters, dtype=float)
+    for i, d in enumerate(diameters):
+        out[i] = integrate_detector_cone_minus_fsc_rect_bar(
+            n_particle,
+            float(d),
+            wavelength_vacuum,
+            n_medium,
+            detector_center_deg,
+            detector_half_angle_deg,
+            mask_half_angle_y_deg,
+            mask_half_angle_z_deg,
+            polarization=polarization,
+            signal_mode=signal_mode,
+            n_phi=n_phi,
+        )
+    return out
+
+
+def diameter_sweep_detector_cone_minus_rect_mask(
+    n_particle: complex,
+    diameters: np.ndarray,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    detector_half_angle_deg: float,
+    mask_half_angle_x_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_phi: int = 720,
+) -> np.ndarray:
+    """One integrate_detector_cone_minus_rect_mask per diameter."""
+    out = np.empty_like(diameters, dtype=float)
+    for i, d in enumerate(diameters):
+        out[i] = integrate_detector_cone_minus_rect_mask(
+            n_particle,
+            float(d),
+            wavelength_vacuum,
+            n_medium,
+            detector_center_deg,
+            detector_half_angle_deg,
+            mask_half_angle_x_deg,
+            mask_half_angle_z_deg,
+            polarization=polarization,
+            signal_mode=signal_mode,
+            n_phi=n_phi,
+        )
+    return out
+
+
+def diameter_sweep_detector_annular_cone_minus_rect_mask(
+    n_particle: complex,
+    diameters: np.ndarray,
+    wavelength_vacuum: float,
+    n_medium: float,
+    detector_center_deg: float,
+    outer_half_angle_deg: float,
+    inner_half_angle_deg: float,
+    mask_half_angle_x_deg: float,
+    mask_half_angle_z_deg: float,
+    *,
+    polarization: Polarization = "unpolarized",
+    signal_mode: SignalMode = "absolute_cross_section",
+    n_phi: int = 720,
+) -> np.ndarray:
+    """One integrate_detector_annular_cone_minus_rect_mask per diameter."""
+    out = np.empty_like(diameters, dtype=float)
+    for i, d in enumerate(diameters):
+        out[i] = integrate_detector_annular_cone_minus_rect_mask(
+            n_particle,
+            float(d),
+            wavelength_vacuum,
+            n_medium,
+            detector_center_deg,
+            outer_half_angle_deg,
+            inner_half_angle_deg,
+            mask_half_angle_x_deg,
+            mask_half_angle_z_deg,
+            polarization=polarization,
+            signal_mode=signal_mode,
+            n_phi=n_phi,
         )
     return out
 

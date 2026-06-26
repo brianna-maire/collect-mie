@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from collect_mie.core import (
     integrate_detector_annular_cone,
     integrate_detector_cone,
+    integrate_detector_cone_minus_fsc_rect_bar,
     integrate_detector_cone_rect_mask,
     integrate_polar_band,
 )
@@ -190,6 +191,280 @@ def test_ssc_rect_mask_tight_is_smaller_than_cone():
         n_phi=1440,
     )
     assert masked < 0.5 * cone
+
+
+def test_fsc_rect_mask_wide_is_smaller_than_outer_cone():
+    """Wide rectangular bar overlaps most of the forward outer cone."""
+    n_particle = 1.59 + 0j
+    wavelength_nm = 488.0
+    n_medium = 1.33
+    fsc_center_deg = 0.0
+    alpha_out, _ = fsc_half_angles_deg(0.34, 0.23, n_medium)
+    diameter_nm = 40.0
+
+    outer = integrate_detector_cone(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        n_points=2000,
+    )
+    masked = integrate_detector_cone_minus_fsc_rect_bar(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        mask_half_angle_y_deg=89.5,
+        mask_half_angle_z_deg=89.5,
+        n_points=2000,
+        n_phi=1440,
+    )
+    assert masked < outer
+    assert masked < 0.55 * outer
+
+
+def test_fsc_rect_mask_tight_blocks_central_scatter():
+    """Cone-aligned bar subtracts near-axis forward scatter."""
+    n_particle = 1.59 + 0j
+    wavelength_nm = 488.0
+    n_medium = 1.33
+    fsc_center_deg = 0.0
+    alpha_out, alpha_in = fsc_half_angles_deg(0.34, 0.23, n_medium)
+    diameter_nm = 40.0
+
+    outer = integrate_detector_cone(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        n_points=2000,
+    )
+    masked = integrate_detector_cone_minus_fsc_rect_bar(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        mask_half_angle_y_deg=5.0,
+        mask_half_angle_z_deg=5.0,
+        n_points=2000,
+        n_phi=1440,
+    )
+    annular = integrate_detector_annular_cone(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        alpha_in,
+        n_points=2000,
+    )
+    assert masked < outer
+    assert masked > annular
+
+
+def test_fsc_rect_mask_ignores_na_inner():
+    """When rect bar is set, na_inner does not affect the integral."""
+    from collect_mie.fsc_collection import integrate_fsc_collection
+
+    n_particle = 1.59 + 0j
+    wavelength_nm = 488.0
+    n_medium = 1.33
+    alpha_out, alpha_in_small = fsc_half_angles_deg(0.34, 0.23, n_medium)
+    _, alpha_in_large = fsc_half_angles_deg(0.34, 0.30, n_medium)
+    diameter_nm = 40.0
+    kwargs = dict(
+        n_particle=n_particle,
+        diameter=diameter_nm,
+        wavelength_vacuum=wavelength_nm,
+        n_medium=n_medium,
+        detector_center_deg=0.0,
+        outer_half_angle_deg=alpha_out,
+        mask_half_angle_y_deg=89.5,
+        mask_half_angle_z_deg=89.5,
+        n_phi=720,
+    )
+    with_small_inner = integrate_fsc_collection(
+        **kwargs, inner_half_angle_deg=alpha_in_small
+    )
+    with_large_inner = integrate_fsc_collection(
+        **kwargs, inner_half_angle_deg=alpha_in_large
+    )
+    assert with_small_inner == with_large_inner
+
+
+def test_fsc_without_rect_mask_uses_na_inner():
+    from collect_mie.fsc_collection import integrate_fsc_collection
+
+    n_particle = 1.59 + 0j
+    wavelength_nm = 488.0
+    n_medium = 1.33
+    alpha_out, alpha_in = fsc_half_angles_deg(0.34, 0.23, n_medium)
+    diameter_nm = 40.0
+
+    annular = integrate_fsc_collection(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        0.0,
+        alpha_out,
+        alpha_in,
+        mask_half_angle_y_deg=None,
+        mask_half_angle_z_deg=None,
+    )
+    expected = integrate_detector_annular_cone(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        0.0,
+        alpha_out,
+        alpha_in,
+        n_points=4000,
+    )
+    assert abs(annular - expected) / max(expected, 1e-30) < 1e-9
+
+
+def test_fsc_cone_minus_rect_mask_wide_is_smaller_than_cone():
+    n_particle = 1.59 + 0j
+    wavelength_nm = 488.0
+    n_medium = 1.33
+    fsc_center_deg = 0.0
+    alpha_out, _ = fsc_half_angles_deg(0.34, 0.0, n_medium)
+    diameter_nm = 40.0
+
+    cone = integrate_detector_cone(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        n_points=2000,
+    )
+    masked = integrate_detector_cone_minus_fsc_rect_bar(
+        n_particle,
+        diameter_nm,
+        wavelength_nm,
+        n_medium,
+        fsc_center_deg,
+        alpha_out,
+        mask_half_angle_y_deg=89.5,
+        mask_half_angle_z_deg=89.5,
+        n_points=2000,
+        n_phi=1440,
+    )
+    assert masked < 0.6 * cone
+
+
+def test_plot_diameter_with_fsc_mask_uses_rect_subtraction():
+    from collect_mie.config_schema import PlotDiameterConfig
+    from collect_mie.fsc_collection import diameter_sweep_fsc_from_config
+
+    flat = {
+        "wavelength_nm": 488.0,
+        "n_medium": 1.33,
+        "n_real": 1.59,
+        "fsc_center_deg": 0.0,
+        "fsc_na_outer": 0.34,
+        "fsc_na_inner": 0.23,
+        "fsc_mask_half_angle_y_deg": 89.5,
+        "fsc_mask_half_angle_z_deg": 89.5,
+        "d_min_um": 0.04,
+        "d_max_um": 0.08,
+        "n_diameters": 5,
+        "fsc_rect_mask_n_phi": 360,
+    }
+    cfg = PlotDiameterConfig.model_validate(flat)
+    n_particle = 1.59 + 0j
+    diam_nm = np.array([40.0])
+    alpha_out, alpha_in = fsc_half_angles_deg(
+        cfg.fsc_na_outer, cfg.fsc_na_inner, cfg.n_medium
+    )
+    masked = diameter_sweep_fsc_from_config(
+        n_particle,
+        diam_nm,
+        488.0,
+        cfg,
+        alpha_out,
+        alpha_in,
+        polarization="unpolarized",
+        signal_mode="absolute_cross_section",
+    )
+    from collect_mie.core import diameter_sweep_detector_cone_minus_fsc_rect_bar
+
+    expected = diameter_sweep_detector_cone_minus_fsc_rect_bar(
+        n_particle,
+        diam_nm,
+        488.0,
+        cfg.n_medium,
+        cfg.fsc_center_deg,
+        alpha_out,
+        89.5,
+        89.5,
+        n_phi=360,
+    )
+    np.testing.assert_allclose(masked, expected)
+
+
+def test_fsc_mask_requires_both_half_angles():
+    from collect_mie.config_schema import PlotDiameterConfig
+
+    with pytest.raises(ValidationError):
+        PlotDiameterConfig.model_validate(
+            {
+                "wavelength_nm": 488,
+                "n_real": 1.59,
+                "fsc_na_outer": 0.34,
+                "fsc_mask_half_angle_y_deg": 68.0,
+            }
+        )
+
+
+def test_plot_diameter_fsc_rect_mask_yaml_merges_fsc_and_plot_sections():
+    from collect_mie.config_schema import PlotDiameterFscRectMaskConfig
+
+    raw = {
+        "mie": {"wavelength_nm": 488, "n_real": 1.602},
+        "fsc": {"na_outer": 0.164, "na_inner": 0.053},
+        "plot_diameter_fsc_rect_mask": {
+            "mask_half_angle_y_deg": 0.053,
+            "mask_half_angle_z_deg": 0.164,
+            "fsc_rect_mask_n_phi": 360,
+        },
+        "plot_diameter": {
+            "d_min_um": 5.0,
+            "d_max_um": 40.0,
+            "n_diameters": 50,
+            "normalize": "max",
+        },
+    }
+    flat = merge_config_dict(
+        raw,
+        command_name="plot-diameter-fsc-rect-mask",
+        include_fsc=True,
+        include_ssc=False,
+    )
+    cfg = PlotDiameterFscRectMaskConfig.model_validate(flat)
+    assert cfg.wavelength_nm == 488
+    assert cfg.fsc_na_outer == 0.164
+    assert cfg.fsc_na_inner == 0.053
+    assert cfg.fsc_mask_half_angle_y_deg == 0.053
+    assert cfg.fsc_mask_half_angle_z_deg == 0.164
+    assert cfg.fsc_rect_mask_n_phi == 360
+    assert cfg.d_min_um == 5.0
+    assert cfg.d_max_um == 40.0
+    assert cfg.n_diameters == 50
+    assert cfg.normalize == "max"
 
 
 def test_plot_diameter_ssc_rect_mask_yaml_merges_ssc_mask_keys():
@@ -407,6 +682,7 @@ def test_plot_format_helpers():
         fmt_na,
         fmt_n,
         fmt_particle_n,
+        format_fsc_rect_mask_note,
         format_ssc_rect_mask_note,
     )
 
@@ -421,6 +697,9 @@ def test_plot_format_helpers():
     )
     assert format_ssc_rect_mask_note(68.0, 75.0, prefix="") == (
         "NA cone ∩ rect mask (mask_x=68.0°, mask_z=75.0°)"
+    )
+    assert format_fsc_rect_mask_note(68.0, 75.0) == (
+        ", NA cone w\\ rect bar(mask_y=68.0°, mask_z=75.0°)"
     )
 
 

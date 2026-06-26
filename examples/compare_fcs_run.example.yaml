@@ -10,7 +10,7 @@ run:
     write_run_record: examples/output/compare_fcs_run_record.yaml
 
 mie:
-  wavelength_nm: 405
+  wavelength_nm: 488
   n_medium: 1.3374
   n_real: 1.6020
   n_imag: 0.0
@@ -33,7 +33,7 @@ compare_fcs:
   # Omit fsc_channel (or leave unset) to plot SSC only — no FCS or Mie FSC panel.
   # fsc_channel: FSC-A
   # Spectral (Cytek) files use e.g. "SSC (Violet)-A"; adjust to match your $PnS labels.
-  ssc_channel: SSC (Violet)-H
+  ssc_channel: SSC (Blue)-H
   channel_naming: "$PnN"
   normalize: least_squares
   d_min_um: 0.06

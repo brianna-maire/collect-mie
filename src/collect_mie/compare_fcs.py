@@ -22,7 +22,8 @@ from collect_mie.common import (
 )
 from collect_mie.config import load_config
 from collect_mie.config_schema import CompareFcsConfig
-from collect_mie.core import diameter_sweep_detector_annular_cone, normalize_relative
+from collect_mie.core import normalize_relative
+from collect_mie.fsc_collection import diameter_sweep_fsc_from_config
 from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.fcs_io import (
     LogHistogramPeakResult,
@@ -144,12 +145,11 @@ def _scaled_prediction_sweep(
     """Dense diameter sweep with model × LS calibration scale (instrument units)."""
     diam_nm = diam_um * 1000.0
     if channel == "fsc":
-        raw = diameter_sweep_detector_annular_cone(
+        raw = diameter_sweep_fsc_from_config(
             n_particle,
             diam_nm,
             wl_nm,
-            cfg.n_medium,
-            cfg.fsc_center_deg,
+            cfg,
             fsc_alpha_outer,
             fsc_alpha_inner,
             polarization=cfg.polarization,
@@ -591,12 +591,11 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         fsc_alpha_outer, fsc_alpha_inner = fsc_half_angles_deg(
             cfg.fsc_na_outer, cfg.fsc_na_inner, cfg.n_medium
         )
-        fsc_model_raw = diameter_sweep_detector_annular_cone(
+        fsc_model_raw = diameter_sweep_fsc_from_config(
             n_particle,
             diam_nm,
             wl_nm,
-            cfg.n_medium,
-            cfg.fsc_center_deg,
+            cfg,
             fsc_alpha_outer,
             fsc_alpha_inner,
             polarization=cfg.polarization,

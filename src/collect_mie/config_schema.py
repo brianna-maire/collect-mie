@@ -26,6 +26,7 @@ SignalModeCli = Literal["absolute-cross-section", "phase-function"]
 BandsChoice = Literal["both", "fsc", "ssc"]
 NormalizeSimple = Literal["max", "first"]
 CompareNormalize = Literal["max", "first", "least_squares"]
+CompareDataSource = Literal["manifest", "table"]
 MedianError = Literal["none", "bootstrap"]
 ChannelGate = Literal["none", "log_decades"]
 ChannelSummary = Literal["median", "peak_gated_median"]
@@ -241,16 +242,14 @@ class PlotDiameterFscRectMaskConfig(
     normalize: NormalizeSimple = "max"
 
 
-class CompareFcsConfig(
-    MediumOptics, ParticleOptics, FscBandMixin, SscBandMixin, DiameterSweep, RunOutputFields
-):
-    manifest: str
-    fsc_channel: str | None = None
-    ssc_channel: str = "SSC-A"
+class CompareChannelBase(DiameterSweep, RunOutputFields):
+    data_source: CompareDataSource = "manifest"
+    manifest: str | None = None
+    points_manifest: str | None = None
     channel_naming: ChannelNaming = "$PnS"
     normalize: CompareNormalize = "max"
-    ssc_histogram_output: str | None = None
-    ssc_histogram_bins: int = Field(default=50, gt=0)
+    histogram_output: str | None = None
+    histogram_bins: int = Field(default=50, gt=0)
     median_error: MedianError = "none"
     median_ci_percent: float = Field(default=95.0, gt=0, lt=100)
     median_bootstrap_n: int = Field(default=2000, ge=100)
@@ -265,9 +264,27 @@ class CompareFcsConfig(
     peak_smooth_bins: int = Field(default=3, ge=1)
 
     @model_validator(mode="after")
-    def check_least_squares_signal_mode(self) -> CompareFcsConfig:
+    def check_data_source(self) -> CompareChannelBase:
+        if self.data_source == "manifest":
+            if not self.manifest:
+                raise ValueError("data_source=manifest requires manifest")
+        elif self.data_source == "table":
+            if not self.points_manifest:
+                raise ValueError("data_source=table requires points_manifest")
+        return self
+
+    @model_validator(mode="after")
+    def check_least_squares_signal_mode(self) -> CompareChannelBase:
         if self.normalize == "least_squares" and self.signal_mode != "absolute-cross-section":
             raise ValueError(
                 "normalize=least_squares requires mie.signal_mode=absolute-cross-section"
             )
         return self
+
+
+class CompareSscConfig(MediumOptics, ParticleOptics, SscBandMixin, CompareChannelBase):
+    ssc_channel: str = "SSC-A"
+
+
+class CompareFscConfig(MediumOptics, ParticleOptics, FscBandMixin, CompareChannelBase):
+    fsc_channel: str

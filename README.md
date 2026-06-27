@@ -64,7 +64,8 @@ The following analyses can be selected with `run.command` in a YAML file:
 | [`plot-refractive-index`](#plot-refractive-index) | SSC vs diameter for several particle refractive indices. |
 | [`plot-ssc-vs-na`](#plot-ssc-vs-na) | Integrated SSC vs side-detector NA for several particle diameters. |
 | [`plot-diameter-ssc-rect-mask`](#plot-diameter-ssc-rect-mask) | SSC NA cone only integration and NA cone ∩ rectangular cuvette mask integration vs particle diameter. |
-| [`compare-fcs`](#compare-fcs) | Overlay FCS medians from `.fcs` files on the same model at manifest diameters. |
+| [`compare-ssc`](#compare-ssc) | Overlay SSC medians from `.fcs` files on the Mie SSC model at manifest diameters. |
+| [`compare-fsc`](#compare-fsc) | Overlay FSC medians from `.fcs` files on the Mie FSC model at manifest diameters. |
 
  Routines here are order-of-magnitude knobs for exploring relative scatter magnitude and spherical particle size trends. Real forward scatter (FSC) and side scatter (SSC) signals depend on laser power density, detector response, flow velocity, particle structure and many other physicalities which we do not included here. 
 
@@ -206,7 +207,7 @@ Base parameters for the homogeneous-sphere Mie calculation (**[miepython](https:
 | `signal_mode` | `absolute-cross-section`, `phase-function` | `phase-function`: `norm='albedo'`, shape only. `absolute-cross-section`: `norm='qsca'` then multiply by $\pi(d/2)^2$ for size comparisons. |
 
 
-### FSC: `fsc:` → `fsc_*` (`plot-diameter`, `compare-fcs`)
+### FSC: `fsc:` → `fsc_*` (`plot-diameter`, `compare-fsc`)
 Detector geometry for FSC signal integration.
 | YAML key | Flat field | Meaning |
 |----------|------------|---------|
@@ -307,21 +308,22 @@ Uses `mie`, `ssc`, and command section.
 
 ---
 
-### `compare-fcs` (Under active development)
+### `compare-ssc` (Under active development)
 
-Compares experimental forward/side scatter to the Mie model at the same nominal particle diameters. Reads a manifest of diameter + `.fcs` file paths, plots median FSC and SSC from each file against model FSC (annular cone) and SSC (cone or masked) evaluated only at those diameters. Normalization is applied separately to each trace so instrument gain and model scale can be aligned for shape comparison. Two stacked panels: FSC on top, SSC on bottom.
+Compares experimental side scatter to the Mie SSC model at the same nominal particle diameters. Reads a manifest of diameter + `.fcs` file paths, plots SSC medians from each file against the model SSC curve (cone or masked) evaluated at those diameters. Normalization aligns instrument gain and model scale for shape comparison.
 
-Uses `mie`, `fsc`, `ssc`, and `compare_fcs:`.
+Uses `mie`, `ssc`, and `compare_ssc:`.
 
 | Field | Default | Meaning |
 |-------|---------|---------|
-| `manifest` | *(required)* | Text file: nominal diameter (µm) and `.fcs` path per line. |
-| `fsc_channel` | *(omit)* | FSC column for median; omit to skip the FSC panel and Mie FSC curve. |
-| `ssc_channel` | `SSC-A` | SSC column for median. |
+| `data_source` | `manifest` | `manifest` (read `.fcs` files) or `table` (precomputed medians). |
+| `manifest` | *(required when `data_source=manifest`)* | Text file: nominal diameter (µm) and `.fcs` path per line. |
+| `points_manifest` | *(required when `data_source=table`)* | Text file: diameter (µm) and precomputed median per line (whitespace- or comma-separated). No histogram figure. |
+| `ssc_channel` | `SSC-A` | SSC column for median (manifest mode) or legend label (table mode). |
 | `channel_naming` | `$PnS` | `$PnS` or `$PnN` for FCS keyword lookup. |
-| `normalize` | `max` | `max` or `first` (relative overlay per trace), or `least_squares` (FCS medians in instrument units; model × single LS scale per channel). `least_squares` requires `signal_mode: absolute-cross-section`. |
-| `ssc_histogram_output` | *(derive from `output`)* | PNG of per-file SSC histogram subplots with medians marked. |
-| `ssc_histogram_bins` | `50` | Histogram bin count for the SSC panel figure. |
+| `normalize` | `max` | `max` or `first` (relative overlay), or `least_squares` (medians in instrument units; model × single LS scale). `least_squares` requires `signal_mode: absolute-cross-section`. |
+| `histogram_output` | *(derive from `output`)* | PNG of per-file SSC histogram subplots with medians marked. |
+| `histogram_bins` | `50` | Histogram bin count for the histogram figure. |
 | `median_error` | `none` | `none` or `bootstrap` — vertical bars from bootstrap CI on each file’s median. |
 | `median_ci_percent` | `95` | Two-sided CI level (e.g. `95` → 2.5th–97.5th percentiles of bootstrap medians). |
 | `median_bootstrap_n` | `2000` | Bootstrap resamples per `.fcs` file. |
@@ -329,11 +331,34 @@ Uses `mie`, `fsc`, `ssc`, and `compare_fcs:`.
 | `median_gate` | `none` | `none` or `log_decades` — keep events within median/10^w…median×10^w before medians/CI. |
 | `median_gate_log_decades` | `0.5` | Half-width in decades (each side) for `log_decades` gate. |
 | `median_gate_min_events` | `100` | If the gate keeps fewer events, fall back to all positive events (with a warning). |
-| `d_min_um`, `d_max_um`, `n_diameters` | `0.04`, `0.40`, `120` | With `least_squares`, dense prediction curve on the top panel over this diameter range (model × LS scale). |
+| `d_min_um`, `d_max_um`, `n_diameters` | `0.04`, `0.40`, `120` | With `least_squares`, dense prediction curve over this diameter range (model × LS scale). |
 
-With `least_squares`, FCS medians stay at manifest diameters; the top panel adds a calibrated Mie prediction line from `d_min_um` to `d_max_um`. Parity and residual subplots and R²/RMSE appear in the title. SSC histograms are a separate figure.
+With `least_squares`, FCS medians stay at manifest diameters; the compare panel adds a calibrated Mie prediction line from `d_min_um` to `d_max_um`. Parity and residual subplots and R²/RMSE appear in the title. SSC histograms are a separate figure.
 
-**Manifest format:** one bead per line — diameter (µm) and path (whitespace- or comma-separated). Lines starting with `#` are ignored.
+---
+
+### `compare-fsc` (Under active development)
+
+Same workflow as `compare-ssc`, but for forward scatter: experimental FSC medians vs the Mie FSC annular-cone model at manifest diameters.
+
+Uses `mie`, `fsc`, and `compare_fsc:`.
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `data_source` | `manifest` | `manifest` or `table` — same as `compare-ssc`. |
+| `manifest` | *(required when `data_source=manifest`)* | Text file: nominal diameter (µm) and `.fcs` path per line. |
+| `points_manifest` | *(required when `data_source=table`)* | Diameter + precomputed median table (see `compare-ssc`). |
+| `fsc_channel` | *(required)* | FSC column for median (manifest mode) or legend label (table mode). |
+| `channel_naming` | `$PnS` | `$PnS` or `$PnN` for FCS keyword lookup. |
+| `normalize` | `max` | Same options as `compare-ssc`. |
+| `histogram_output` | *(derive from `output`)* | PNG of per-file FSC histogram subplots with medians marked. |
+| `histogram_bins` | `50` | Histogram bin count for the histogram figure. |
+| `median_error`, `median_ci_percent`, `median_bootstrap_*`, `median_gate*`, `channel_summary`, `peak_*` | same as `compare-ssc` | Shared median/peak-gating options. |
+| `d_min_um`, `d_max_um`, `n_diameters` | `0.04`, `0.40`, `120` | With `least_squares`, dense FSC prediction curve (model × LS scale). |
+
+**Manifest format (`data_source=manifest`):** one bead per line — diameter (µm) and path (whitespace- or comma-separated). Lines starting with `#` are ignored.
+
+**Points table format (`data_source=table`):** one bead per line — diameter (µm) and precomputed median (instrument units). Example: `examples/beads.example.csv`.
 
 ---
 
@@ -346,11 +371,14 @@ Templates under `examples/`:
 - `refractive_index_run.example.yaml`
 - `plot_ssc_vs_na_run.example.yaml`
 - `plot_diameter_ssc_rect_mask_run.example.yaml`
-- `compare_fcs_run.example.yaml`
+- `compare_ssc_run.example.yaml`
+- `compare_ssc_table_run.example.yaml`
+- `compare_fsc_table_run.example.yaml`
+- `compare_fsc_run.example.yaml`
 
 ```bash
 collect-mie examples/plot_diameter_run.example.yaml
 python examples/run_example_configs.py # all *_run.example.yaml
 ```
 
-`compare-fcs` is skipped by the batch runner unless `examples/compare_manifest.txt` exists (see `compare_manifest.example.txt`).
+Manifest-based `compare-ssc` / `compare-fsc` configs are skipped by the batch runner unless `examples/compare_manifest.txt` exists (see `compare_manifest.example.txt`). Table-mode configs (e.g. `compare_ssc_table_run.example.yaml`, `compare_fsc_table_run.example.yaml`) run without `.fcs` files.

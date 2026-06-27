@@ -1,34 +1,37 @@
-"""Compare experimental .fcs medians to Mie model curves at manifest diameters."""
+"""Shared backend for comparing experimental .fcs medians to Mie model curves."""
 
 from __future__ import annotations
 
 import math
 import sys
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import AutoMinorLocator, LogLocator
+from pydantic import BaseModel
 
 from collect_mie.common import (
-    fsc_half_angles_deg,
+    resolve_fsc_half_angles_deg,
     resolve_ssc_band_deg,
     ssc_half_angle_deg,
     signal_mode_value,
 )
+from collect_mie.fsc_collection import fsc_uses_rect_mask
 from collect_mie.config import load_config
-from collect_mie.config_schema import CompareFcsConfig
+from collect_mie.config_schema import CompareFscConfig, CompareSscConfig
 from collect_mie.core import normalize_relative
 from collect_mie.fsc_collection import diameter_sweep_fsc_from_config
-from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
 from collect_mie.fcs_io import (
     LogHistogramPeakResult,
     channel_summary_and_bounds,
     load_manifest_rows,
+    load_points_manifest,
     read_channel,
 )
 from collect_mie.plot_title import (
@@ -37,18 +40,46 @@ from collect_mie.plot_title import (
     build_figure_title,
 )
 from collect_mie.run_config import resolve_config_path, write_run_record
+from collect_mie.ssc_collection import diameter_sweep_ssc_from_config
+
+CompareChannelConfig = CompareSscConfig | CompareFscConfig
+ScatterChannel = Literal["fsc", "ssc"]
 
 
-def resolve_ssc_histogram_output(
-    primary_output: str | None, explicit: str | None
+class _CompareMedianFields(Protocol):
+    data_source: str
+    channel_summary: str
+    median_error: str
+    median_gate: str
+    median_gate_log_decades: float
+    median_gate_min_events: int
+    peak_histogram_bins: int
+    peak_selection: str
+    peak_prominence_fraction: float
+    peak_smooth_bins: int
+    median_ci_percent: float
+    median_bootstrap_n: int
+    median_bootstrap_max_events: int
+
+
+def resolve_histogram_output(
+    primary_output: str | None,
+    explicit: str | None,
 ) -> str | None:
     """Histogram PNG path: explicit config, else derived from ``output``."""
     if explicit:
         return explicit
     if primary_output:
         path = Path(primary_output)
-        return str(path.with_name(f"{path.stem}_ssc_histograms{path.suffix}"))
+        return str(path.with_name(f"{path.stem}_histograms{path.suffix}"))
     return None
+
+
+def resolve_ssc_histogram_output(
+    primary_output: str | None, explicit: str | None
+) -> str | None:
+    """Backward-compatible alias for histogram path derivation."""
+    return resolve_histogram_output(primary_output, explicit)
 
 
 def _relative_to_fitted(observed: np.ndarray, fitted: np.ndarray) -> np.ndarray:
@@ -130,14 +161,14 @@ def _normalize_median_bounds(
 
 
 def _scaled_prediction_sweep(
-    cfg: CompareFcsConfig,
+    cfg: CompareChannelConfig,
     *,
     diam_um: np.ndarray,
     n_particle: complex,
     wl_nm: float,
     smode: str,
     scale: float,
-    channel: Literal["fsc", "ssc"],
+    channel: ScatterChannel,
     fsc_alpha_outer: float = 0.0,
     fsc_alpha_inner: float = 0.0,
     ssc_alpha: float = 0.0,
@@ -189,7 +220,7 @@ def _prepare_compare_trace(
     return exp_y, model_y, yerr, None
 
 
-def _channel_summary_kwargs(cfg: CompareFcsConfig) -> dict[str, object]:
+def _channel_summary_kwargs(cfg: _CompareMedianFields) -> dict[str, object]:
     return {
         "summary": cfg.channel_summary,
         "error": cfg.median_error,
@@ -207,7 +238,7 @@ def _channel_summary_kwargs(cfg: CompareFcsConfig) -> dict[str, object]:
 
 
 def _summarize_channel_values(
-    values_per_file: list[np.ndarray], cfg: CompareFcsConfig
+    values_per_file: list[np.ndarray], cfg: _CompareMedianFields
 ) -> tuple[
     np.ndarray,
     np.ndarray | None,
@@ -224,24 +255,26 @@ def _summarize_channel_values(
         )
 
 
-def _summary_kind_label(cfg: CompareFcsConfig) -> str:
+def _summary_kind_label(cfg: _CompareMedianFields) -> str:
     if cfg.channel_summary == "peak_gated_median":
         return "peak-gated median"
     return "median"
 
 
-def _data_legend_label(cfg: CompareFcsConfig, channel: str) -> str:
+def _data_legend_label(cfg: _CompareMedianFields, channel: str) -> str:
+    if cfg.data_source == "table":
+        return f"Data: {channel}"
     return f"Data: {channel} {_summary_kind_label(cfg)}{_median_legend_suffix(cfg)}"
 
 
-def _median_legend_suffix(cfg: CompareFcsConfig) -> str:
+def _median_legend_suffix(cfg: _CompareMedianFields) -> str:
     if cfg.median_error == "bootstrap":
         return f" ({cfg.median_ci_percent:g}% bootstrap CI)"
     return ""
 
 
 def _style_compare_median_axis(ax: plt.Axes) -> None:
-    """Major + minor grid on the top compare (median vs diameter) panel."""
+    """Major + minor grid on the compare (median vs diameter) panel."""
     ax.xaxis.set_minor_locator(AutoMinorLocator(5))
     ax.yaxis.set_minor_locator(LogLocator(base=10.0, subs=np.arange(2.0, 10.0)))
     ax.grid(True, which="major", alpha=0.3)
@@ -364,8 +397,11 @@ def _peak_selection_label(selection: str) -> str:
     return "rightmost prominent"
 
 
-def _ssc_histogram_title_lines(cfg: CompareFcsConfig, channel_label: str) -> list[str]:
-    lines = [f"Analysis: SSC histograms — {channel_label}"]
+def _histogram_title_lines(
+    cfg: _CompareMedianFields, channel: ScatterChannel, channel_label: str
+) -> list[str]:
+    channel_name = channel.upper()
+    lines = [f"Analysis: {channel_name} histograms — {channel_label}"]
     if cfg.channel_summary == "peak_gated_median":
         lines.append(
             f"summary={cfg.channel_summary}, peak: "
@@ -395,9 +431,10 @@ def _ssc_histogram_title_lines(cfg: CompareFcsConfig, channel_label: str) -> lis
     return lines
 
 
-def _plot_ssc_histograms(
+def _plot_histograms(
     *,
-    cfg: CompareFcsConfig,
+    cfg: _CompareMedianFields,
+    channel: ScatterChannel,
     diam_um: np.ndarray,
     paths: list[str],
     channel_label: str,
@@ -508,7 +545,7 @@ def _plot_ssc_histograms(
     ]
     apply_figure_title(
         fig,
-        "\n".join(_ssc_histogram_title_lines(cfg, channel_label)),
+        "\n".join(_histogram_title_lines(cfg, channel, channel_label)),
         use_suptitle=True,
         rect_bottom=0.07,
         title_fontsize=10,
@@ -530,68 +567,127 @@ def _plot_ssc_histograms(
         plt.show()
 
 
-def main(argv: list[str] | None = None, *, config_path: str | None = None) -> None:
-    path = config_path or resolve_config_path(
-        argv if argv is not None else sys.argv[1:]
-    )
-    cfg = load_config(path, "compare-fcs")
-    assert isinstance(cfg, CompareFcsConfig)
+@dataclass
+class ExperimentalTrace:
+    diam_um: np.ndarray
+    medians: np.ndarray
+    lows: np.ndarray | None
+    highs: np.ndarray | None
+    channel_label: str
+    from_table: bool
+    paths: list[str] | None = None
+    values_per_file: list[np.ndarray] | None = None
+    peak_centers: list[float | None] | None = None
+    gate_bounds: list[tuple[float, float] | None] | None = None
 
+
+def _load_experimental_from_manifest(
+    cfg: CompareChannelConfig,
+    *,
+    channel: ScatterChannel,
+    channel_name: str,
+) -> ExperimentalTrace:
+    assert cfg.manifest is not None
     rows = load_manifest_rows(cfg.manifest)
     diam_exp_um = np.array([r[0] for r in rows])
     order = np.argsort(diam_exp_um)
     diam_exp_um = diam_exp_um[order]
     paths = [rows[i][1] for i in order]
 
-    plot_fsc = cfg.fsc_channel is not None
-
-    if plot_fsc:
-        fsc_per_file = [
-            read_channel(p, cfg.fsc_channel, channel_naming=cfg.channel_naming)[1]
-            for p in paths
-        ]
-        fsc_med, fsc_lo, fsc_hi, _, _, _ = _summarize_channel_values(fsc_per_file, cfg)
-    ssc_col, ssc_values = read_channel(
-        paths[0], cfg.ssc_channel, channel_naming=cfg.channel_naming
+    col_label, values_per_file = _load_channel_values_per_file(
+        paths,
+        channel_name,
+        channel_naming=cfg.channel_naming,
+        channel_label=channel,
     )
-    ssc_per_file: list[np.ndarray] = [ssc_values]
+    med, lo, hi, peak_centers, gate_bounds, _ = _summarize_channel_values(
+        values_per_file, cfg
+    )
+    return ExperimentalTrace(
+        diam_um=diam_exp_um,
+        medians=med,
+        lows=lo,
+        highs=hi,
+        channel_label=col_label,
+        from_table=False,
+        paths=paths,
+        values_per_file=values_per_file,
+        peak_centers=peak_centers,
+        gate_bounds=gate_bounds,
+    )
+
+
+def _load_experimental_from_table(
+    cfg: CompareChannelConfig,
+    *,
+    channel_name: str,
+) -> ExperimentalTrace:
+    assert cfg.points_manifest is not None
+    rows = load_points_manifest(cfg.points_manifest)
+    diam_exp_um = np.array([r[0] for r in rows])
+    med = np.array([r[1] for r in rows])
+    order = np.argsort(diam_exp_um)
+    return ExperimentalTrace(
+        diam_um=diam_exp_um[order],
+        medians=med[order],
+        lows=None,
+        highs=None,
+        channel_label=channel_name,
+        from_table=True,
+    )
+
+
+def _load_experimental_trace(
+    cfg: CompareChannelConfig,
+    *,
+    channel: ScatterChannel,
+    channel_name: str,
+) -> ExperimentalTrace:
+    if cfg.data_source == "table":
+        return _load_experimental_from_table(cfg, channel_name=channel_name)
+    return _load_experimental_from_manifest(
+        cfg, channel=channel, channel_name=channel_name
+    )
+
+
+def _load_channel_values_per_file(
+    paths: list[str],
+    channel_name: str,
+    *,
+    channel_naming: str,
+    channel_label: ScatterChannel,
+) -> tuple[str, list[np.ndarray]]:
+    col, values = read_channel(
+        paths[0], channel_name, channel_naming=channel_naming  # type: ignore[arg-type]
+    )
+    per_file: list[np.ndarray] = [values]
     for p in paths[1:]:
-        col, values = read_channel(
-            p, cfg.ssc_channel, channel_naming=cfg.channel_naming
+        next_col, next_values = read_channel(
+            p, channel_name, channel_naming=channel_naming  # type: ignore[arg-type]
         )
-        if col != ssc_col:
+        if next_col != col:
             raise ValueError(
-                f"SSC column name mismatch: {ssc_col!r} vs {col!r} in {p!r}"
+                f"{channel_label.upper()} column name mismatch: "
+                f"{col!r} vs {next_col!r} in {p!r}"
             )
-        ssc_per_file.append(values)
-    (
-        ssc_med,
-        ssc_lo,
-        ssc_hi,
-        ssc_peak_centers,
-        ssc_gate_bounds,
-        _,
-    ) = _summarize_channel_values(ssc_per_file, cfg)
-    ssc_alpha = ssc_half_angle_deg(cfg.ssc_na, cfg.n_medium)
-    ssc_min, ssc_max = resolve_ssc_band_deg(
-        ssc_na=cfg.ssc_na,
-        ssc_center_deg=cfg.ssc_center_deg,
-        n_medium=cfg.n_medium,
-    )
-    if ssc_min >= ssc_max:
-        raise SystemExit("SSC band: min angle must be less than max angle")
+        per_file.append(next_values)
+    return col, per_file
 
-    wl_nm = cfg.wavelength_nm
-    n_particle = complex(cfg.n_real, cfg.n_imag)
-    diam_nm = diam_exp_um * 1000.0
-    smode = signal_mode_value(cfg.signal_mode)
 
-    fsc_ls_scale: float | None = None
-    if plot_fsc:
-        fsc_alpha_outer, fsc_alpha_inner = fsc_half_angles_deg(
-            cfg.fsc_na_outer, cfg.fsc_na_inner, cfg.n_medium
-        )
-        fsc_model_raw = diameter_sweep_fsc_from_config(
+def _model_raw_at_manifest(
+    cfg: CompareChannelConfig,
+    *,
+    channel: ScatterChannel,
+    diam_nm: np.ndarray,
+    n_particle: complex,
+    wl_nm: float,
+    smode: str,
+    fsc_alpha_outer: float,
+    fsc_alpha_inner: float,
+    ssc_alpha: float,
+) -> np.ndarray:
+    if channel == "fsc":
+        return diameter_sweep_fsc_from_config(
             n_particle,
             diam_nm,
             wl_nm,
@@ -601,11 +697,7 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             polarization=cfg.polarization,
             signal_mode=smode,
         )
-        fsc_exp, fsc_model, fsc_yerr, fsc_ls_scale = _prepare_compare_trace(
-            fsc_med, fsc_lo, fsc_hi, fsc_model_raw, cfg.normalize
-        )
-
-    ssc_model_raw = diameter_sweep_ssc_from_config(
+    return diameter_sweep_ssc_from_config(
         n_particle,
         diam_nm,
         wl_nm,
@@ -614,169 +706,175 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
         polarization=cfg.polarization,
         signal_mode=smode,
     )
-    ssc_exp, ssc_model, ssc_yerr, ssc_ls_scale = _prepare_compare_trace(
-        ssc_med, ssc_lo, ssc_hi, ssc_model_raw, cfg.normalize
+
+
+def _model_curve_label(channel: ScatterChannel, *, use_ls: bool, prediction: bool) -> str:
+    suffix = " (LS scaled)" if use_ls else ""
+    if channel == "fsc":
+        return f"Mie FSC {'prediction' if prediction else 'band'}{suffix}"
+    return f"Mie SSC {'prediction' if prediction else 'calibration'}{suffix}"
+
+
+def _compare_plot_style(channel: ScatterChannel, *, use_ls: bool) -> dict[str, str]:
+    """Line/marker styling aligned with legacy compare-fcs SSC panel conventions."""
+    data_color = "C0" if channel == "fsc" else "C1"
+    if use_ls:
+        return {
+            "data_color": data_color,
+            "data_marker": "s",
+            "model_color": "k",
+            "model_linestyle": "--",
+        }
+    return {
+        "data_color": data_color,
+        "data_marker": "s",
+        "model_color": data_color,
+        "model_linestyle": "-",
+    }
+
+
+def run_compare(
+    cfg: CompareChannelConfig,
+    *,
+    command_name: str,
+    channel: ScatterChannel,
+    channel_name: str,
+    config_path: str,
+) -> None:
+    """Compare experimental scatter medians to the Mie model for one channel."""
+    trace = _load_experimental_trace(cfg, channel=channel, channel_name=channel_name)
+    diam_exp_um = trace.diam_um
+    med = trace.medians
+    lo, hi = trace.lows, trace.highs
+
+    fsc_alpha_outer = 0.0
+    fsc_alpha_inner = 0.0
+    ssc_alpha = 0.0
+    uses_fsc_rect_mask = False
+    if channel == "fsc":
+        uses_fsc_rect_mask = fsc_uses_rect_mask(
+            cfg.fsc_mask_half_angle_y_deg, cfg.fsc_mask_half_angle_z_deg
+        )
+        fsc_alpha_outer, fsc_alpha_inner = resolve_fsc_half_angles_deg(
+            fsc_na_outer=cfg.fsc_na_outer,
+            fsc_na_inner=cfg.fsc_na_inner,
+            n_medium=cfg.n_medium,
+            mask_half_angle_y_deg=cfg.fsc_mask_half_angle_y_deg,
+            mask_half_angle_z_deg=cfg.fsc_mask_half_angle_z_deg,
+        )
+    else:
+        ssc_alpha = ssc_half_angle_deg(cfg.ssc_na, cfg.n_medium)
+        ssc_min, ssc_max = resolve_ssc_band_deg(
+            ssc_na=cfg.ssc_na,
+            ssc_center_deg=cfg.ssc_center_deg,
+            n_medium=cfg.n_medium,
+        )
+        if ssc_min >= ssc_max:
+            raise SystemExit("SSC band: min angle must be less than max angle")
+
+    wl_nm = cfg.wavelength_nm
+    n_particle = complex(cfg.n_real, cfg.n_imag)
+    diam_nm = diam_exp_um * 1000.0
+    smode = signal_mode_value(cfg.signal_mode)
+
+    model_raw = _model_raw_at_manifest(
+        cfg,
+        channel=channel,
+        diam_nm=diam_nm,
+        n_particle=n_particle,
+        wl_nm=wl_nm,
+        smode=smode,
+        fsc_alpha_outer=fsc_alpha_outer,
+        fsc_alpha_inner=fsc_alpha_inner,
+        ssc_alpha=ssc_alpha,
+    )
+    exp_y, model_y, yerr, ls_scale = _prepare_compare_trace(
+        med, lo, hi, model_raw, cfg.normalize
     )
 
     use_instrument_units = cfg.normalize == "least_squares"
-    model_label_suffix = " (LS scaled)" if use_instrument_units else ""
+    style = _compare_plot_style(channel, use_ls=use_instrument_units)
 
-    ls_diag_channels: list[
-        tuple[str, np.ndarray, np.ndarray, np.ndarray | None, str]
-    ] = []
-    if use_instrument_units:
-        if plot_fsc and fsc_ls_scale is not None:
-            ls_diag_channels.append(
-                (str(cfg.fsc_channel), fsc_exp, fsc_model, fsc_yerr, "C0")
-            )
-        if ssc_ls_scale is not None:
-            ls_diag_channels.append(
-                (cfg.ssc_channel, ssc_exp, ssc_model, ssc_yerr, "C1")
-            )
+    ls_diag: tuple[str, np.ndarray, np.ndarray, np.ndarray | None, str] | None = None
+    if use_instrument_units and ls_scale is not None:
+        ls_diag = (channel_name, exp_y, model_y, yerr, style["data_color"])
 
-    embed_ls_panels = bool(ls_diag_channels)
-    n_compare_rows = 2 if plot_fsc else 1
-    n_rows = n_compare_rows + (len(ls_diag_channels) if embed_ls_panels else 0)
+    embed_ls_panels = ls_diag is not None
+    n_rows = 1 + (1 if embed_ls_panels else 0)
 
     if embed_ls_panels:
         fig = plt.figure(figsize=(9.0, 3.4 * n_rows), layout="constrained")
         gs = fig.add_gridspec(n_rows, 2)
-        row = 0
-        ax_fsc = fig.add_subplot(gs[row, :]) if plot_fsc else None
-        if plot_fsc:
-            row += 1
-        ax_ssc = fig.add_subplot(gs[row, :])
-        if ax_fsc is not None:
-            ax_ssc.sharex(ax_fsc)
-        row += 1
-        ls_panel_axes: list[tuple[plt.Axes, plt.Axes]] = []
-        for _ in ls_diag_channels:
-            ls_panel_axes.append(
-                (fig.add_subplot(gs[row, 0]), fig.add_subplot(gs[row, 1]))
-            )
-            row += 1
-    elif plot_fsc:
-        fig, (ax_fsc, ax_ssc) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
-        ls_panel_axes = []
+        ax_compare = fig.add_subplot(gs[0, :])
+        ax_parity = fig.add_subplot(gs[1, 0])
+        ax_resid = fig.add_subplot(gs[1, 1])
     else:
-        fig, ax_ssc = plt.subplots(1, 1, figsize=(8, 4.5))
-        ax_fsc = None
-        ls_panel_axes = []
+        fig, ax_compare = plt.subplots(1, 1, figsize=(8, 4.5))
+        ax_parity = ax_resid = None  # type: ignore[assignment]
 
     diam_pred_um = np.linspace(cfg.d_min_um, cfg.d_max_um, cfg.n_diameters)
 
-    if plot_fsc:
-        if use_instrument_units and fsc_ls_scale is not None:
-            fsc_pred_um, fsc_pred = _scaled_prediction_sweep(
-                cfg,
-                diam_um=diam_pred_um,
-                n_particle=n_particle,
-                wl_nm=wl_nm,
-                smode=smode,
-                scale=fsc_ls_scale,
-                channel="fsc",
-                fsc_alpha_outer=fsc_alpha_outer,
-                fsc_alpha_inner=fsc_alpha_inner,
-            )
-            ax_fsc.plot(
-                fsc_pred_um,
-                fsc_pred,
-                color="C0",
-                linewidth=1.2,
-                label=f"Mie FSC prediction{model_label_suffix}",
-                zorder=2,
-            )
-        else:
-            ax_fsc.plot(
-                diam_exp_um,
-                fsc_model,
-                color="C0",
-                label=f"Mie FSC band{model_label_suffix}",
-            )
-        fsc_label = _data_legend_label(cfg, str(cfg.fsc_channel))
-        _scatter_median(
-            ax_fsc,
-            diam_exp_um,
-            fsc_exp,
-            fsc_yerr,
-            color="C0",
-            marker="o",
-            label=fsc_label,
-        )
-        ax_fsc.set_ylabel(
-            f"{_summary_kind_label(cfg).title()} {cfg.fsc_channel}"
-            if use_instrument_units
-            else "Relative FSC"
-        )
-        ax_fsc.legend(loc="best")
-        ax_fsc.set_yscale("log")
-        _style_compare_median_axis(ax_fsc)
-
-    if use_instrument_units and ssc_ls_scale is not None:
-        ssc_pred_um, ssc_pred = _scaled_prediction_sweep(
+    if use_instrument_units and ls_scale is not None:
+        pred_um, pred = _scaled_prediction_sweep(
             cfg,
             diam_um=diam_pred_um,
             n_particle=n_particle,
             wl_nm=wl_nm,
             smode=smode,
-            scale=ssc_ls_scale,
-            channel="ssc",
+            scale=ls_scale,
+            channel=channel,
+            fsc_alpha_outer=fsc_alpha_outer,
+            fsc_alpha_inner=fsc_alpha_inner,
             ssc_alpha=ssc_alpha,
         )
-        ax_ssc.plot(
-            ssc_pred_um,
-            ssc_pred,
-            color="k",
-            linestyle="--",
+        ax_compare.plot(
+            pred_um,
+            pred,
+            color=style["model_color"],
+            linestyle=style["model_linestyle"],
             linewidth=1.2,
-            label=f"Mie SSC prediction{model_label_suffix}",
+            label=_model_curve_label(channel, use_ls=True, prediction=True),
             zorder=2,
         )
     else:
-        ax_ssc.plot(
+        ax_compare.plot(
             diam_exp_um,
-            ssc_model,
-            color="C1",
-            label=f"Mie SSC calibration{model_label_suffix}",
+            model_y,
+            color=style["model_color"],
+            linestyle=style["model_linestyle"],
+            label=_model_curve_label(channel, use_ls=False, prediction=False),
         )
-    ssc_label = _data_legend_label(cfg, cfg.ssc_channel)
+
+    data_label = _data_legend_label(cfg, channel_name)
     _scatter_median(
-        ax_ssc,
+        ax_compare,
         diam_exp_um,
-        ssc_exp,
-        ssc_yerr,
-        color="C1",
-        marker="s",
-        label=ssc_label,
+        exp_y,
+        yerr,
+        color=style["data_color"],
+        marker=style["data_marker"],
+        label=data_label,
     )
-    ax_ssc.set_xlabel("Diameter (µm)")
-    ax_ssc.set_ylabel(
-        f"{_summary_kind_label(cfg).title()} {cfg.ssc_channel}"
+    ax_compare.set_xlabel("Diameter (µm)")
+    rel_ylabel = "Relative FSC" if channel == "fsc" else "Relative SSC"
+    ax_compare.set_ylabel(
+        f"{'Median' if trace.from_table else _summary_kind_label(cfg).title()} {channel_name}"
         if use_instrument_units
-        else "Relative SSC"
+        else rel_ylabel
     )
-    ax_ssc.legend(loc="best")
-    ax_ssc.set_yscale("log")
-    _style_compare_median_axis(ax_ssc)
+    ax_compare.legend(loc="best")
+    ax_compare.set_yscale("log")
+    _style_compare_median_axis(ax_compare)
 
     extra_title_lines: list[str] = []
-    if use_instrument_units:
-        if plot_fsc and fsc_ls_scale is not None:
-            fsc_r2, fsc_rmse = fit_metrics(fsc_exp, fsc_model)
-            extra_title_lines.append(
-                _format_ls_cal_line(
-                    str(cfg.fsc_channel), fsc_ls_scale, fsc_r2, fsc_rmse
-                )
-            )
-        if ssc_ls_scale is not None:
-            ssc_r2, ssc_rmse = fit_metrics(ssc_exp, ssc_model)
-            extra_title_lines.append(
-                _format_ls_cal_line(cfg.ssc_channel, ssc_ls_scale, ssc_r2, ssc_rmse)
-            )
+    if use_instrument_units and ls_scale is not None:
+        r2, rmse = fit_metrics(exp_y, model_y)
+        extra_title_lines.append(
+            _format_ls_cal_line(channel_name, ls_scale, r2, rmse)
+        )
 
-    for (ax_parity, ax_resid), (name, obs, fit, yerr, color) in zip(
-        ls_panel_axes, ls_diag_channels
-    ):
+    if embed_ls_panels and ls_diag is not None and ax_parity is not None and ax_resid is not None:
+        name, obs, fit, err, color = ls_diag
         _draw_ls_fit_panels(
             ax_parity,
             ax_resid,
@@ -784,52 +882,75 @@ def main(argv: list[str] | None = None, *, config_path: str | None = None) -> No
             name=name,
             observed=obs,
             fitted=fit,
-            yerr=yerr,
+            yerr=err,
             color=color,
         )
+
     title_ctx = TitleContext(
-        uses_fsc=plot_fsc,
-        uses_ssc=True,
-        fsc_alpha_outer=fsc_alpha_outer if plot_fsc else None,
-        fsc_alpha_inner=fsc_alpha_inner if plot_fsc else None,
-        ssc_alpha=ssc_alpha,
+        uses_fsc=channel == "fsc",
+        uses_ssc=channel == "ssc",
+        fsc_alpha_outer=fsc_alpha_outer if channel == "fsc" else None,
+        fsc_alpha_inner=(
+            fsc_alpha_inner if channel == "fsc" and not uses_fsc_rect_mask else None
+        ),
+        ssc_alpha=ssc_alpha if channel == "ssc" else None,
         extra_lines=extra_title_lines,
     )
     apply_figure_title(
         fig,
-        build_figure_title("compare-fcs", cfg, title_ctx),
+        build_figure_title(command_name, cfg, title_ctx),
         use_suptitle=True,
     )
-
-    hist_output = resolve_ssc_histogram_output(cfg.output, cfg.ssc_histogram_output)
 
     if cfg.output:
         _save_figure(fig, cfg.output)
     else:
         plt.show()
 
-    _plot_ssc_histograms(
-        cfg=cfg,
-        diam_um=diam_exp_um,
-        paths=paths,
-        channel_label=ssc_col,
-        values_per_file=ssc_per_file,
-        summaries=ssc_med,
-        summary_label=_summary_kind_label(cfg),
-        gate_bounds=ssc_gate_bounds,
-        peak_centers=ssc_peak_centers,
-        bins=cfg.ssc_histogram_bins,
-        hist_output=hist_output,
-    )
+    if not trace.from_table and trace.values_per_file is not None:
+        hist_output = resolve_histogram_output(cfg.output, cfg.histogram_output)
+        _plot_histograms(
+            cfg=cfg,
+            channel=channel,
+            diam_um=diam_exp_um,
+            paths=trace.paths or [],
+            channel_label=trace.channel_label,
+            values_per_file=trace.values_per_file,
+            summaries=med,
+            summary_label=_summary_kind_label(cfg),
+            gate_bounds=trace.gate_bounds or [],
+            peak_centers=trace.peak_centers or [],
+            bins=cfg.histogram_bins,
+            hist_output=hist_output,
+        )
 
     if cfg.write_run_record:
         write_run_record(
             cfg.write_run_record,
-            command_name="compare-fcs",
-            config_path=path,
+            command_name=command_name,
+            config_path=config_path,
             resolved=cfg,
         )
 
 
-if __name__ == "__main__":
-    main()
+def _main_for_command(
+    command_name: str,
+    channel: ScatterChannel,
+    model_cls: type[BaseModel],
+    *,
+    config_path: str | None = None,
+    argv: list[str] | None = None,
+) -> None:
+    path = config_path or resolve_config_path(
+        argv if argv is not None else sys.argv[1:]
+    )
+    cfg = load_config(path, command_name)
+    assert isinstance(cfg, model_cls)
+    channel_name = cfg.fsc_channel if channel == "fsc" else cfg.ssc_channel
+    run_compare(
+        cfg,
+        command_name=command_name,
+        channel=channel,
+        channel_name=channel_name,
+        config_path=path,
+    )

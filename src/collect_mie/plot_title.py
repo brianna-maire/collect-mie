@@ -30,10 +30,12 @@ COMMAND_ALIASES: dict[str, str] = {
     "plot-ssc-vs-na": "SSC vs numerical aperture",
     "plot-diameter-ssc-rect-mask": "SSC cone vs rectangular mask",
     "plot-diameter-fsc-rect-mask": "FSC annular NA vs rectangular bar",
-    "compare-fcs": "Scatter Data vs Mie model",
+    "compare-ssc": "SSC data vs Mie model",
+    "compare-fsc": "FSC data vs Mie model",
     "plot-angle-beam": "GLMT angular intensity",
     "plot-diameter-beam": "GLMT integrated scatter vs diameter",
-    "compare-fcs-beam": "Scatter Data vs GLMT model",
+    "compare-ssc-beam": "SSC data vs GLMT model",
+    "compare-fsc-beam": "FSC data vs GLMT model",
 }
 
 
@@ -183,18 +185,18 @@ def _line_command(command: str, cfg: BaseModel) -> str | None:
     if command == "plot-diameter-fsc-rect-mask":
         c = cfg
         return f"d={c.d_min_um:g}–{c.d_max_um:g} µm, normalize={c.normalize}"
-    if command in ("compare-fcs", "compare-fcs-beam"):
+    if command in ("compare-ssc", "compare-fsc", "compare-ssc-beam", "compare-fsc-beam"):
         c = cfg
-        manifest = Path(c.manifest).name
-        parts = [
-            f"manifest={manifest}",
-            f"normalize={c.normalize}",
-            f"summary={c.channel_summary}",
-        ]
-        if c.median_gate != "none":
-            parts.append(f"gate={c.median_gate}±{c.median_gate_log_decades:g} decades")
-        if c.median_error == "bootstrap":
-            parts.append(f"CI={c.median_ci_percent:g}% bootstrap")
+        parts = [f"normalize={c.normalize}"]
+        if getattr(c, "data_source", "manifest") == "table":
+            parts.insert(0, f"points={Path(c.points_manifest).name}")
+        else:
+            parts.insert(0, f"manifest={Path(c.manifest).name}")
+            parts.append(f"summary={c.channel_summary}")
+            if c.median_gate != "none":
+                parts.append(f"gate={c.median_gate}±{c.median_gate_log_decades:g} decades")
+            if c.median_error == "bootstrap":
+                parts.append(f"CI={c.median_ci_percent:g}% bootstrap")
         return ", ".join(parts)
     return None
 

@@ -12,6 +12,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = Path("examples/plot_diameter_run.example.yaml")
 # CONFIG_PATH = Path("examples/plot_diameter_fsc_rect_mask_run.example.yaml")
+CONFIG_PATH = Path("examples/compare_fsc_table_run.example.yaml")
 
 
 def main(argv: list[str] | None = None) -> int:

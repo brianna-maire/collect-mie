@@ -703,22 +703,30 @@ def test_plot_format_helpers():
     )
 
 
-def test_resolve_ssc_histogram_output_derives_from_primary():
-    from collect_mie.compare_fcs import resolve_ssc_histogram_output
+def test_resolve_histogram_output_derives_from_primary():
+    from collect_mie.compare_channel import resolve_histogram_output, resolve_ssc_histogram_output
 
     assert (
-        resolve_ssc_histogram_output("out/compare_fcs.png", None)
-        == "out/compare_fcs_ssc_histograms.png"
+        resolve_histogram_output("out/compare_ssc.png", None)
+        == "out/compare_ssc_histograms.png"
     )
     assert (
-        resolve_ssc_histogram_output("out/compare_fcs.png", "out/custom.png")
+        resolve_histogram_output("out/compare_fsc.png", None)
+        == "out/compare_fsc_histograms.png"
+    )
+    assert (
+        resolve_ssc_histogram_output("out/compare_ssc.png", None)
+        == "out/compare_ssc_histograms.png"
+    )
+    assert (
+        resolve_histogram_output("out/compare_ssc.png", "out/custom.png")
         == "out/custom.png"
     )
-    assert resolve_ssc_histogram_output(None, None) is None
+    assert resolve_histogram_output(None, None) is None
 
 
 def test_fit_metrics_through_origin():
-    from collect_mie.compare_fcs import fit_metrics
+    from collect_mie.compare_channel import fit_metrics
 
     observed = np.array([2.0, 4.0, 6.0])
     fitted = np.array([2.0, 4.0, 6.0])
@@ -733,7 +741,7 @@ def test_fit_metrics_through_origin():
 
 
 def test_least_squares_scale():
-    from collect_mie.compare_fcs import least_squares_scale
+    from collect_mie.compare_channel import least_squares_scale
 
     data = np.array([2.0, 4.0, 6.0])
     model = np.array([1.0, 2.0, 3.0])
@@ -741,7 +749,7 @@ def test_least_squares_scale():
 
 
 def test_prepare_compare_trace_least_squares():
-    from collect_mie.compare_fcs import _prepare_compare_trace
+    from collect_mie.compare_channel import _prepare_compare_trace
 
     med = np.array([10.0, 20.0])
     model = np.array([1.0, 3.0])
@@ -752,11 +760,11 @@ def test_prepare_compare_trace_least_squares():
     assert yerr is None
 
 
-def test_compare_fcs_rejects_least_squares_with_phase_function():
-    from collect_mie.config_schema import CompareFcsConfig
+def test_compare_channel_rejects_least_squares_with_phase_function():
+    from collect_mie.config_schema import CompareSscConfig
 
     with pytest.raises(ValidationError):
-        CompareFcsConfig.model_validate(
+        CompareSscConfig.model_validate(
             {
                 "manifest": "m.txt",
                 "normalize": "least_squares",
@@ -787,7 +795,7 @@ def test_apply_channel_gate_none_passthrough():
 
 
 def test_relative_to_fitted_residual():
-    from collect_mie.compare_fcs import _relative_to_fitted
+    from collect_mie.compare_channel import _relative_to_fitted
 
     obs = np.array([100.0, 1000.0, 10_000.0])
     fit = np.array([80.0, 1200.0, 8000.0])
@@ -875,7 +883,7 @@ def test_channel_median_and_bounds_bootstrap():
 
 
 def test_normalize_median_bounds_matches_normalize_relative():
-    from collect_mie.compare_fcs import _normalize_median_bounds
+    from collect_mie.compare_channel import _normalize_median_bounds
 
     med = np.array([10.0, 20.0, 40.0])
     lo = np.array([8.0, 15.0, 30.0])
@@ -886,22 +894,108 @@ def test_normalize_median_bounds_matches_normalize_relative():
     assert yerr.shape == (2, 3)
 
 
-def test_compare_fcs_config_allows_omitted_fsc_channel():
-    from collect_mie.config_schema import CompareFcsConfig
+def test_compare_ssc_config_defaults():
+    from collect_mie.config_schema import CompareSscConfig
 
-    cfg = CompareFcsConfig.model_validate(
+    cfg = CompareSscConfig.model_validate(
         {
             "manifest": "examples/compare_manifest.txt",
             "ssc_channel": "SSC-A",
         }
     )
-    assert cfg.fsc_channel is None
+    assert cfg.ssc_channel == "SSC-A"
 
 
-def test_compare_fcs_config_accepts_diameter_sweep():
-    from collect_mie.config_schema import CompareFcsConfig
+def test_compare_fsc_config_requires_fsc_channel():
+    from collect_mie.config_schema import CompareFscConfig
 
-    cfg = CompareFcsConfig.model_validate(
+    with pytest.raises(ValidationError):
+        CompareFscConfig.model_validate({"manifest": "examples/compare_manifest.txt"})
+
+
+def test_compare_ssc_table_config_requires_points_manifest():
+    from collect_mie.config_schema import CompareSscConfig
+
+    with pytest.raises(ValidationError):
+        CompareSscConfig.model_validate({"data_source": "table"})
+
+
+def test_compare_ssc_table_config_accepts_points_manifest():
+    from collect_mie.config_schema import CompareSscConfig
+
+    cfg = CompareSscConfig.model_validate(
+        {
+            "data_source": "table",
+            "points_manifest": "examples/beads.example.csv",
+        }
+    )
+    assert cfg.data_source == "table"
+    assert cfg.points_manifest == "examples/beads.example.csv"
+    assert cfg.manifest is None
+
+
+def test_compare_manifest_config_requires_manifest():
+    from collect_mie.config_schema import CompareSscConfig
+
+    with pytest.raises(ValidationError):
+        CompareSscConfig.model_validate({"data_source": "manifest"})
+
+
+def test_load_points_manifest_parses_rows(tmp_path):
+    from collect_mie.fcs_io import load_points_manifest
+
+    path = tmp_path / "beads.csv"
+    path.write_text("# d  median\n0.1, 100\n0.2 200\n")
+    rows = load_points_manifest(str(path))
+    assert rows == [(0.1, 100.0), (0.2, 200.0)]
+
+
+def test_compare_ssc_table_run_writes_output(tmp_path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from collect_mie.compare_ssc import main
+
+    beads = tmp_path / "beads.csv"
+    beads.write_text("0.1 100\n0.2 200\n")
+    out = tmp_path / "compare.png"
+    record = tmp_path / "record.yaml"
+    cfg = tmp_path / "run.yaml"
+    cfg.write_text(
+        f"""
+run:
+  command: compare-ssc
+  args:
+    output: {out}
+    write_run_record: {record}
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.602
+  signal_mode: absolute-cross-section
+
+ssc:
+  center_deg: 90.0
+  na: 1.15
+
+compare_ssc:
+  data_source: table
+  points_manifest: {beads}
+  ssc_channel: SSC-A
+  normalize: max
+""",
+        encoding="utf-8",
+    )
+    main(config_path=str(cfg))
+    assert out.is_file()
+    assert record.is_file()
+
+
+def test_compare_channel_config_accepts_diameter_sweep():
+    from collect_mie.config_schema import CompareSscConfig
+
+    cfg = CompareSscConfig.model_validate(
         {
             "manifest": "m.txt",
             "d_min_um": 0.1,
@@ -910,6 +1004,20 @@ def test_compare_fcs_config_accepts_diameter_sweep():
         }
     )
     assert cfg.d_max_um == 0.5
+
+
+def test_resolve_fsc_half_angles_deg_allows_small_outer_with_rect_mask():
+    from collect_mie.common import resolve_fsc_half_angles_deg
+
+    outer, inner = resolve_fsc_half_angles_deg(
+        fsc_na_outer=0.164,
+        fsc_na_inner=0.23,
+        n_medium=1.3374,
+        mask_half_angle_y_deg=2.3,
+        mask_half_angle_z_deg=7.1,
+    )
+    assert outer > 0
+    assert inner == 0.0
 
 
 def test_load_manifest_rows_joins_path_with_spaces(tmp_path):

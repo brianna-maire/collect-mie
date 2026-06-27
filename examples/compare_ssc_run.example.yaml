@@ -1,13 +1,13 @@
-# Run: collect-mie examples/compare_fcs_run.example.yaml
+# Run: collect-mie examples/compare_ssc_run.example.yaml
 # Requires examples/compare_manifest.txt (copy from compare_manifest.example.txt).
 
 run:
-  command: compare-fcs
+  command: compare-ssc
   args:
-    output: examples/output/compare_fcs.png
-    # Optional; defaults to compare_fcs_ssc_histograms.png next to output.
-    # ssc_histogram_output: examples/output/compare_fcs_ssc_histograms.png
-    write_run_record: examples/output/compare_fcs_run_record.yaml
+    output: examples/output/compare_ssc.png
+    # Optional; defaults to compare_ssc_histograms.png next to output.
+    # histogram_output: examples/output/compare_ssc_histograms.png
+    write_run_record: examples/output/compare_ssc_run_record.yaml
 
 mie:
   wavelength_nm: 488
@@ -17,21 +17,14 @@ mie:
   polarization: unpolarized
   signal_mode: absolute-cross-section
 
-fsc:
-  center_deg: 0.0
-  na_outer: 0.34
-  na_inner: 0.23
-
 ssc:
   center_deg: 90.0
   na: 1.15
   mask_half_angle_x_deg: 68.0
   mask_half_angle_z_deg: 75.0
 
-compare_fcs:
+compare_ssc:
   manifest: examples/compare_manifest.txt
-  # Omit fsc_channel (or leave unset) to plot SSC only — no FCS or Mie FSC panel.
-  # fsc_channel: FSC-A
   # Spectral (Cytek) files use e.g. "SSC (Violet)-A"; adjust to match your $PnS labels.
   ssc_channel: SSC (Blue)-H
   channel_naming: "$PnN"
@@ -39,7 +32,7 @@ compare_fcs:
   d_min_um: 0.06
   d_max_um: 0.5
   n_diameters: 120
-  ssc_histogram_bins: 300
+  histogram_bins: 300
   channel_summary: peak_gated_median
   peak_selection: rightmost_prominent
   peak_histogram_bins: 300

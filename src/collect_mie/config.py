@@ -8,7 +8,8 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from collect_mie.config_schema import (
-    CompareFcsConfig,
+    CompareFscConfig,
+    CompareSscConfig,
     PlotAngleConfig,
     PlotDiameterConfig,
     PlotDiameterFscRectMaskConfig,
@@ -26,7 +27,8 @@ CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "plot-ssc-vs-na": PlotSscVsNaConfig,
     "plot-diameter-ssc-rect-mask": PlotDiameterSscRectMaskConfig,
     "plot-diameter-fsc-rect-mask": PlotDiameterFscRectMaskConfig,
-    "compare-fcs": CompareFcsConfig,
+    "compare-ssc": CompareSscConfig,
+    "compare-fsc": CompareFscConfig,
 }
 
 
@@ -41,12 +43,12 @@ def load_config(config_path: str, command_name: str) -> BaseModel:
         raw,
         command_name=command_name,
         include_fsc=command_name
-        in ("plot-diameter", "compare-fcs", "plot-diameter-fsc-rect-mask"),
+        in ("plot-diameter", "compare-fsc", "plot-diameter-fsc-rect-mask"),
         include_ssc=command_name
         in (
             "plot-diameter",
             "plot-refractive-index",
-            "compare-fcs",
+            "compare-ssc",
             "plot-diameter-ssc-rect-mask",
         ),
     )

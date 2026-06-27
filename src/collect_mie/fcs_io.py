@@ -506,6 +506,29 @@ def median_channel(path: str, channel: str, *, channel_naming: str = "$PnS") -> 
     return float(np.median(values))
 
 
+def load_points_manifest(path: str) -> list[tuple[float, float]]:
+    """
+    Parse a diameter + median table (CSV or whitespace):
+
+      diameter_um  median
+
+    Lines starting with # are ignored.
+    """
+    rows: list[tuple[float, float]] = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.replace(",", " ").split()
+            if len(parts) < 2:
+                raise ValueError(f"Bad points manifest line: {line!r}")
+            rows.append((float(parts[0]), float(parts[1])))
+    if not rows:
+        raise ValueError(f"No rows in points manifest {path!r}")
+    return rows
+
+
 def load_manifest_rows(path: str) -> list[tuple[float, str]]:
     """
     Parse a simple manifest: two columns per line (CSV or whitespace):

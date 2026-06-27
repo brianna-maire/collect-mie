@@ -30,7 +30,8 @@ mie-plot-refractive-index = "collect_mie.__main__:main"
 mie-plot-ssc-vs-na = "collect_mie.__main__:main"
 mie-plot-diameter-ssc-rect-mask = "collect_mie.__main__:main"
 mie-plot-diameter-fsc-rect-mask = "collect_mie.__main__:main"
-mie-compare-fcs = "collect_mie.__main__:main"
+mie-compare-ssc = "collect_mie.__main__:main"
+mie-compare-fsc = "collect_mie.__main__:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

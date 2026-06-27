@@ -18,7 +18,7 @@ from collect_mie.config_schema import PlotDiameterConfig, PlotSscVsNaConfig
 
 def test_command_aliases_cover_run_commands():
     assert analysis_alias("plot-diameter") == COMMAND_ALIASES["plot-diameter"]
-    assert "Compare:" not in COMMAND_ALIASES["compare-fcs"]
+    assert "Compare:" not in COMMAND_ALIASES["compare-ssc"]
     assert "Sweep:" not in COMMAND_ALIASES.values()
 
 
@@ -93,23 +93,21 @@ def test_figure_title_sits_above_axes_without_using_y_equals_one():
     plt.close(fig)
 
 
-def test_compare_fcs_title_from_example_config():
-    cfg = load_config("examples/compare_fcs_run.example.yaml", "compare-fcs")
+def test_compare_ssc_title_from_example_config():
+    cfg = load_config("examples/compare_ssc_run.example.yaml", "compare-ssc")
     title = build_figure_title(
-        "compare-fcs",
+        "compare-ssc",
         cfg,
         TitleContext(
-            uses_fsc=True,
+            uses_fsc=False,
             uses_ssc=True,
-            fsc_alpha_outer=12.3,
-            fsc_alpha_inner=4.5,
             ssc_alpha=48.2,
-            extra_lines=["SSC-A: R²=0.99, RMSE=1e3, scale=2.5"],
+            extra_lines=["SSC (Blue)-H: R²=0.99, RMSE=1e3, scale=2.5"],
         ),
     )
-    assert title.startswith("Analysis: FCS vs Mie model\n")
+    assert title.startswith("Analysis: SSC data vs Mie model\n")
     assert "Compare:" not in title
     assert "Prediction sweep:" not in title
-    assert "SSC-A: R²=0.99" in title
-    assert any(line.startswith("FSC:") for line in title.split("\n"))
+    assert "SSC (Blue)-H: R²=0.99" in title
     assert any(line.startswith("SSC:") for line in title.split("\n"))
+    assert not any(line.startswith("FSC:") for line in title.split("\n"))

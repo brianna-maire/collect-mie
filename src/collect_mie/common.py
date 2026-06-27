@@ -61,3 +61,25 @@ def fsc_half_angles_deg(
     alpha_outer = math.degrees(math.asin(na_out / n_medium))
     alpha_inner = math.degrees(math.asin(na_in / n_medium))
     return alpha_outer, alpha_inner
+
+
+def resolve_fsc_half_angles_deg(
+    *,
+    fsc_na_outer: float,
+    fsc_na_inner: float,
+    n_medium: float,
+    mask_half_angle_y_deg: float | None = None,
+    mask_half_angle_z_deg: float | None = None,
+) -> tuple[float, float]:
+    """
+    FSC half-angles for titles and sweeps.
+
+    When both rect-mask half-angles are set, ``na_inner`` is ignored for
+    integration and ``0`` is used here so ``na_outer`` may be below the default
+    ``na_inner`` without error.
+    """
+    uses_rect_mask = (
+        mask_half_angle_y_deg is not None and mask_half_angle_z_deg is not None
+    )
+    na_inner = 0.0 if uses_rect_mask else fsc_na_inner
+    return fsc_half_angles_deg(fsc_na_outer, na_inner, n_medium)

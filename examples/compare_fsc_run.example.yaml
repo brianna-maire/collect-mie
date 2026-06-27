@@ -1,0 +1,38 @@
+# Run: collect-mie examples/compare_fsc_run.example.yaml
+# Requires examples/compare_manifest.txt (copy from compare_manifest.example.txt).
+
+run:
+  command: compare-fsc
+  args:
+    output: examples/output/compare_fsc.png
+    # Optional; defaults to compare_fsc_histograms.png next to output.
+    # histogram_output: examples/output/compare_fsc_histograms.png
+    write_run_record: examples/output/compare_fsc_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.6020
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+fsc:
+  center_deg: 0.0
+  na_outer: 0.34
+  na_inner: 0.23
+
+compare_fsc:
+  manifest: examples/compare_manifest.txt
+  fsc_channel: FSC-A
+  channel_naming: "$PnS"
+  normalize: least_squares
+  d_min_um: 0.06
+  d_max_um: 0.5
+  n_diameters: 120
+  histogram_bins: 300
+  channel_summary: peak_gated_median
+  peak_selection: rightmost_prominent
+  peak_histogram_bins: 300
+  peak_prominence_fraction: 0.7
+  median_gate_log_decades: 0.25

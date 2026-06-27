@@ -1,0 +1,31 @@
+# Run: collect-mie examples/compare_ssc_table_run.example.yaml
+# Uses precomputed diameter/median pairs — no .fcs files or peak finding.
+
+run:
+  command: compare-ssc
+  args:
+    output: examples/output/compare_ssc_table.png
+    write_run_record: examples/output/compare_ssc_table_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.6020
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+ssc:
+  center_deg: 90.0
+  na: 1.15
+  mask_half_angle_x_deg: 68.0
+  mask_half_angle_z_deg: 75.0
+
+compare_ssc:
+  data_source: table
+  points_manifest: examples/beads.example.csv
+  ssc_channel: SSC (Blue)-H
+  normalize: least_squares
+  d_min_um: 0.06
+  d_max_um: 0.5
+  n_diameters: 120

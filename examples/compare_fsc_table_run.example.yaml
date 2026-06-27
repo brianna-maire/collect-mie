@@ -1,0 +1,31 @@
+# Run: collect-mie examples/compare_fsc_table_run.example.yaml
+# Uses precomputed diameter/median pairs — no .fcs files or peak finding.
+
+run:
+  command: compare-fsc
+  args:
+    output: examples/output/compare_fsc_table.png
+    write_run_record: examples/output/compare_fsc_table_run_record.yaml
+
+mie:
+  wavelength_nm: 488
+  n_medium: 1.3374
+  n_real: 1.6020
+  n_imag: 0.0
+  polarization: unpolarized
+  signal_mode: absolute-cross-section
+
+fsc:
+  center_deg: 0.0
+  na_outer: 0.164
+  mask_half_angle_y_deg: 2.3
+  mask_half_angle_z_deg: 7.1
+
+compare_fsc:
+  data_source: table
+  points_manifest: examples/beads.example.csv
+  fsc_channel: FSC-A
+  normalize: least_squares
+  d_min_um: 5
+  d_max_um: 40
+  n_diameters: 120

@@ -5,7 +5,7 @@ Run all example YAML configs via collect-mie.
 Each `*_run.example.yaml` must include `run.command`.
 Writes figures and run records under `examples/output/`.
 
-Skips `compare-fcs` when `examples/compare_manifest.txt` is missing.
+Skips `compare-ssc` and `compare-fsc` when `examples/compare_manifest.txt` is missing.
 """
 
 from __future__ import annotations
@@ -32,14 +32,58 @@ def _output_path(config_path: Path, repo_root: Path) -> Path | None:
     return None
 
 
+def _compare_data_source(config_path: Path) -> str:
+    import yaml
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        return "manifest"
+    for section in ("compare_ssc", "compare_fsc"):
+        block = data.get(section)
+        if isinstance(block, dict) and block.get("data_source"):
+            return str(block["data_source"])
+    return "manifest"
+
+
+def _points_manifest_missing(config_path: Path, repo_root: Path) -> bool:
+    import yaml
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    points_manifest = None
+    if isinstance(data, dict):
+        for section in ("compare_ssc", "compare_fsc"):
+            block = data.get(section)
+            if isinstance(block, dict) and block.get("points_manifest"):
+                points_manifest = block.get("points_manifest")
+                break
+    if points_manifest is None and isinstance(data, dict) and isinstance(
+        data.get("run"), dict
+    ):
+        run_args = data["run"].get("args")
+        if isinstance(run_args, dict):
+            points_manifest = run_args.get("points_manifest")
+    if points_manifest is None:
+        return True
+    path = Path(points_manifest)
+    if not path.is_absolute():
+        path = repo_root / path
+    return not path.is_file()
+
+
 def _manifest_missing(config_path: Path, repo_root: Path) -> bool:
     import yaml
 
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     manifest = None
-    if isinstance(data, dict) and isinstance(data.get("compare_fcs"), dict):
-        manifest = data["compare_fcs"].get("manifest")
-    if manifest is None and isinstance(data.get("run"), dict):
+    if isinstance(data, dict):
+        for section in ("compare_ssc", "compare_fsc"):
+            block = data.get(section)
+            if isinstance(block, dict) and block.get("manifest"):
+                manifest = block.get("manifest")
+                break
+        else:
+            manifest = None
+    if manifest is None and isinstance(data, dict) and isinstance(data.get("run"), dict):
         run_args = data["run"].get("args")
         if isinstance(run_args, dict):
             manifest = run_args.get("manifest")
@@ -81,13 +125,22 @@ def main() -> int:
             skipped.append(config_path.name)
             continue
 
-        if command == "compare-fcs" and _manifest_missing(config_path, repo_root):
-            print(
-                "Skipping compare-fcs: add examples/compare_manifest.txt "
-                "(see compare_manifest.example.txt)."
-            )
-            skipped.append(config_path.name)
-            continue
+        if command in ("compare-ssc", "compare-fsc"):
+            if _compare_data_source(config_path) == "table":
+                if _points_manifest_missing(config_path, repo_root):
+                    print(
+                        f"Skipping {command}: points_manifest file missing "
+                        f"for table-mode config {config_path.name}."
+                    )
+                    skipped.append(config_path.name)
+                    continue
+            elif _manifest_missing(config_path, repo_root):
+                print(
+                    f"Skipping {command}: add examples/compare_manifest.txt "
+                    "(see compare_manifest.example.txt)."
+                )
+                skipped.append(config_path.name)
+                continue
 
         print(f"Running {command} <- {rel_config}")
         subprocess.run(
